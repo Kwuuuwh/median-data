@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/wf-fetch"]
+members = ["crates/catalog","crates/wf-fetch"]
 
 [workspace.package]
 edition = "2024"
