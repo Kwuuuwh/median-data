@@ -1,0 +1,50 @@
+name: data-pipeline
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: data-pipeline
+  cancel-in-progress: false
+
+jobs:
+  build-catalog:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Fetch last published index hash
+        run: |
+          gh release download --pattern catalog.de_index_hash --dir prev || true
+          if [ -f prev/catalog.de_index_hash ]; then
+            echo "LAST_HASH=$(cat prev/catalog.de_index_hash)" >> "$GITHUB_ENV"
+          else
+            echo "LAST_HASH=" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build catalog
+        run: |
+          cargo run -p catalog --release -- \
+            build --out catalog.sqlite \
+            --skip-unchanged --last-hash "$LAST_HASH"
+
+      - name: Publish catalog
+        run: |
+          if [ -f catalog.sqlite.zst ]; then
+            TAG="data-$(date -u +%Y%m%d-%H%M%S)"
+            gh release create "$TAG" \
+              catalog.sqlite.zst catalog.de_index_hash \
+              --title "$TAG" \
+              --notes "Automated catalog build"
+          else
+            echo "DE index unchanged; nothing to publish"
+          fi
