@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::io::Read;
 
-const WFM_ITEMS_URL: &str = "https://api.warframe.market/v2/items";
-
 /// A WFM catalog match for a DE `uniqueName`: the trade slug and the English display name.
 #[derive(Debug, Clone)]
 pub struct WfmEntry {
@@ -12,13 +10,16 @@ pub struct WfmEntry {
     pub en_name: Option<String>,
 }
 
-/// Fetch WFM v2 `/items` and build the `gameRef` (= DE `uniqueName`) → `WfmEntry` bridge.
-pub fn fetch_bridge(agent: &ureq::Agent) -> anyhow::Result<HashMap<String, WfmEntry>> {
+/// Fetch WFM v2 `/items` from `items_url` and build the `gameRef` → `WfmEntry` bridge.
+pub fn fetch_bridge(
+    agent: &ureq::Agent,
+    items_url: &str,
+) -> anyhow::Result<HashMap<String, WfmEntry>> {
     let mut res = agent
-        .get(WFM_ITEMS_URL)
+        .get(items_url)
         .header("User-Agent", wf_fetch::USER_AGENT)
         .call()
-        .map_err(|e| anyhow::anyhow!("GET {WFM_ITEMS_URL}: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("GET {items_url}: {e}"))?;
     let mut buf = Vec::new();
     res.body_mut().as_reader().read_to_end(&mut buf)?;
     let value: serde_json::Value = serde_json::from_slice(&buf)?;

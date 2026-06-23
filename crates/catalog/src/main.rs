@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -6,9 +6,12 @@ use wf_fetch::{
     DeExportSource, IndexEntry, ManifestSource, http_agent, index_hash, items_from_manifest,
 };
 
+use crate::config::Config;
+
 mod assemble;
 mod category;
 mod compress;
+mod config;
 mod joins;
 mod schema;
 mod wfm_bridge;
@@ -44,10 +47,26 @@ fn run(args: &[String]) -> anyhow::Result<()> {
     }
 }
 
+/// Config directory (`CATALOG_CONFIG_DIR` or `config`).
+fn config_dir() -> PathBuf {
+    std::env::var_os("CATALOG_CONFIG_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("config"))
+}
+
+/// Build a DE Export source from configured endpoints.
+fn de_source(config: &Config) -> DeExportSource {
+    DeExportSource::new(
+        http_agent(),
+        config.endpoints.de_index_base.as_str(),
+        config.endpoints.de_manifest_base.as_str(),
+    )
+}
+
 /// Parsed `build` arguments.
 struct BuildArgs {
     out: String,
-    langs: Vec<String>,
+    langs: Option<Vec<String>>,
     skip_unchanged: bool,
     last_hash: Option<String>,
 }
@@ -55,7 +74,7 @@ struct BuildArgs {
 /// Parse `build` flags, falling back to defaults.
 fn parse_build_args(args: &[String]) -> BuildArgs {
     let mut out = "catalog.sqlite".to_string();
-    let mut langs = vec!["en".to_string(), "ru".to_string()];
+    let mut langs = None;
     let mut skip_unchanged = false;
     let mut last_hash = None;
     let mut i = 0;
@@ -69,11 +88,12 @@ fn parse_build_args(args: &[String]) -> BuildArgs {
             }
             "--langs" => {
                 if let Some(v) = args.get(i + 1) {
-                    langs = v
-                        .split(',')
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect();
+                    langs = Some(
+                        v.split(',')
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect(),
+                    );
                     i += 1;
                 }
             }
@@ -104,8 +124,10 @@ fn should_skip(last_hash: Option<&str>, current_hash: &str) -> bool {
 /// Assemble the catalog, write SQLite, compress to `.zst`, and emit the index-hash sidecar.
 fn build(args: &[String]) -> anyhow::Result<()> {
     let parsed = parse_build_args(args);
-    let source = DeExportSource::with_defaults(http_agent());
+    let config = Config::load(&config_dir())?;
+    let source = de_source(&config);
     let wfm_agent = http_agent();
+    let langs = parsed.langs.unwrap_or_else(|| config.build.langs.clone());
 
     let en_index = source.fetch_index("en")?;
     let current_hash = index_hash(&en_index);
@@ -114,14 +136,14 @@ fn build(args: &[String]) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let data = assemble::assemble_catalog(&source, &wfm_agent, &parsed.langs, now_millis())?;
-    let sqlite_path = std::path::PathBuf::from(&parsed.out);
+    let data = assemble::assemble_catalog(&source, &wfm_agent, &config, &langs, now_millis())?;
+    let sqlite_path = PathBuf::from(&parsed.out);
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
     rt.block_on(write::write_catalog(&sqlite_path, &data))?;
 
-    let zst_path = std::path::PathBuf::from(format!("{}.zst", parsed.out));
+    let zst_path = PathBuf::from(format!("{}.zst", parsed.out));
     compress::compress_file(&sqlite_path, &zst_path, 19)?;
 
     let hash_path = sqlite_path
@@ -151,7 +173,8 @@ fn now_millis() -> i64 {
 
 /// Fetch the EN index and print the manifests with their hash tokens, plus the overall index hash.
 fn probe_index() -> anyhow::Result<()> {
-    let source = DeExportSource::with_defaults(http_agent());
+    let config = Config::load(&config_dir())?;
+    let source = de_source(&config);
     let entries = source.fetch_index("en")?;
     println!(
         "{} manifests (index hash {})",
@@ -166,7 +189,8 @@ fn probe_index() -> anyhow::Result<()> {
 
 /// Fetch a few item-bearing manifests, print counts and a categorized sample item.
 fn probe_items() -> anyhow::Result<()> {
-    let source = DeExportSource::with_defaults(http_agent());
+    let config = Config::load(&config_dir())?;
+    let source = de_source(&config);
     let index = source.fetch_index("en")?;
     for name in ["ExportResources", "ExportWeapons", "ExportWarframes"] {
         let Some(entry) = index.iter().find(|e| e.manifest == name) else {
@@ -176,7 +200,7 @@ fn probe_items() -> anyhow::Result<()> {
         let items = items_from_manifest(&value);
         println!("{name}: {} items", items.len());
         if let Some(first) = items.first() {
-            let cat = category::derive_category(name, &first.unique_name);
+            let cat = category::derive_category(&config.categories, name, &first.unique_name);
             println!("  sample: {} | {} | {}", first.unique_name, first.name, cat);
         }
     }
@@ -186,7 +210,8 @@ fn probe_items() -> anyhow::Result<()> {
 /// Build the ducat and icon maps and print a known prime part's joined values.
 fn probe_joins() -> anyhow::Result<()> {
     const ASH_PRIME_CHASSIS: &str = "/Lotus/Types/Recipes/WarframeRecipes/AshPrimeChassisComponent";
-    let source = DeExportSource::with_defaults(http_agent());
+    let config = Config::load(&config_dir())?;
+    let source = de_source(&config);
     let index = source.fetch_index("en")?;
 
     let recipes = manifest_value(&source, &index, "ExportRecipes")?;
@@ -210,8 +235,9 @@ fn probe_joins() -> anyhow::Result<()> {
 /// Fetch the WFM bridge and print a known prime part's match, with gameRef diagnostics if missing.
 fn probe_wfm() -> anyhow::Result<()> {
     const ASH_PRIME_CHASSIS: &str = "/Lotus/Types/Recipes/WarframeRecipes/AshPrimeChassisComponent";
+    let config = Config::load(&config_dir())?;
     let agent = http_agent();
-    let bridge = wfm_bridge::fetch_bridge(&agent)?;
+    let bridge = wfm_bridge::fetch_bridge(&agent, &config.endpoints.wfm_items_url)?;
     println!("wfm items with gameRef: {}", bridge.len());
     match bridge.get(ASH_PRIME_CHASSIS) {
         Some(entry) => println!(

@@ -2,23 +2,15 @@ use std::collections::HashMap;
 
 use wf_fetch::{IndexEntry, ManifestSource, index_hash, items_from_manifest};
 
+use crate::config::Config;
 use crate::write::{CatalogData, CatalogRow, NameRow};
 use crate::{category, joins, wfm_bridge};
-
-/// Manifests that contribute catalog items (each carries `uniqueName` + `name`).
-const ITEM_MANIFESTS: &[&str] = &[
-    "ExportResources",
-    "ExportWeapons",
-    "ExportWarframes",
-    "ExportSentinels",
-    "ExportUpgrades",
-    "ExportRelicArcane",
-];
 
 /// Fetch DE + WFM data and assemble the in-memory catalog for `langs` (EN is always included first).
 pub fn assemble_catalog(
     source: &dyn ManifestSource,
     wfm_agent: &ureq::Agent,
+    config: &Config,
     langs: &[String],
     built_at_ms: i64,
 ) -> anyhow::Result<CatalogData> {
@@ -30,14 +22,15 @@ pub fn assemble_catalog(
     let mut items: HashMap<String, CatalogRow> = HashMap::new();
     let mut names: Vec<NameRow> = Vec::new();
 
-    for mname in ITEM_MANIFESTS {
-        let Some(entry) = en_index.iter().find(|e| &e.manifest == mname) else {
+    for mname in &config.build.item_manifests {
+        let mname = mname.as_str();
+        let Some(entry) = en_index.iter().find(|e| e.manifest == mname) else {
             continue;
         };
         eprintln!("fetching {mname} (en)");
         let value = source.fetch_manifest(entry)?;
         for raw in items_from_manifest(&value) {
-            let category = category::derive_category(mname, &raw.unique_name);
+            let category = category::derive_category(&config.categories, mname, &raw.unique_name);
             items
                 .entry(raw.unique_name.clone())
                 .or_insert_with(|| CatalogRow {
@@ -70,7 +63,7 @@ pub fn assemble_catalog(
     }
 
     eprintln!("fetching WFM items");
-    let bridge = wfm_bridge::fetch_bridge(wfm_agent)?;
+    let bridge = wfm_bridge::fetch_bridge(wfm_agent, &config.endpoints.wfm_items_url)?;
     let mut bridged = 0usize;
     for (unique_name, row) in items.iter_mut() {
         let matched = bridge.get(unique_name).or_else(|| {
@@ -97,8 +90,9 @@ pub fn assemble_catalog(
     for lang in langs.iter().filter(|l| l.as_str() != "en") {
         eprintln!("fetching {lang} index");
         let index = source.fetch_index(lang)?;
-        for mname in ITEM_MANIFESTS {
-            let Some(entry) = index.iter().find(|e| &e.manifest == mname) else {
+        for mname in &config.build.item_manifests {
+            let mname = mname.as_str();
+            let Some(entry) = index.iter().find(|e| e.manifest == mname) else {
                 continue;
             };
             eprintln!("fetching {mname} ({lang})");

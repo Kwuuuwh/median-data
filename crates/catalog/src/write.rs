@@ -8,8 +8,8 @@ use crate::schema::{DDL_STATEMENTS, SCHEMA_VERSION};
 pub struct CatalogRow {
     /// DE stable key (primary key).
     pub unique_name: String,
-    /// Derived category enum value.
-    pub category: &'static str,
+    /// Derived category value.
+    pub category: String,
     /// Ducat value, if joined from a prime recipe.
     pub ducat: Option<i64>,
     /// WFM trade slug, if bridged.
@@ -71,7 +71,7 @@ pub async fn write_catalog(path: &Path, data: &CatalogData) -> anyhow::Result<()
              VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(&item.unique_name)
-        .bind(item.category)
+        .bind(item.category.as_str())
         .bind(item.ducat)
         .bind(item.wfm_url_name.as_deref())
         .bind(item.tradable as i64)

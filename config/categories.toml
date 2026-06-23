@@ -1,0 +1,33 @@
+default = "other"
+
+[[manifest]]
+name = "ExportWarframes"
+category = "warframe"
+
+[[manifest]]
+name = "ExportSentinels"
+category = "sentinel"
+
+[[manifest]]
+name = "ExportWeapons"
+category = "weapon"
+
+[[manifest]]
+name = "ExportUpgrades"
+category = "mod"
+
+[[manifest]]
+name = "ExportRelicArcane"
+default = "arcane"
+
+[[manifest.rule]]
+contains = "Projections"
+category = "relic"
+
+[[manifest]]
+name = "ExportResources"
+default = "resource"
+
+[[manifest.rule]]
+contains = "/Recipes/"
+category = "part"

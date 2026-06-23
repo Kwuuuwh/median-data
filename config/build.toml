@@ -1,0 +1,9 @@
+langs = ["en", "ru"]
+item_manifests = [
+  "ExportResources",
+  "ExportWeapons",
+  "ExportWarframes",
+  "ExportSentinels",
+  "ExportUpgrades",
+  "ExportRelicArcane",
+]
