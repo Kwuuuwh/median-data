@@ -31,18 +31,17 @@ pub fn assemble_catalog(
         let value = source.fetch_manifest(entry)?;
         for raw in items_from_manifest(&value) {
             let category = category::derive_category(&config.categories, mname, &raw.unique_name);
-            items
-                .entry(raw.unique_name.clone())
-                .or_insert_with(|| CatalogRow {
-                    unique_name: raw.unique_name.clone(),
-                    category,
-                    ducat: None,
-                    wfm_url_name: None,
-                    tradable: false,
-                    icon: None,
-                });
+            let key = catalog_key(&category, &raw.unique_name);
+            items.entry(key.clone()).or_insert_with(|| CatalogRow {
+                unique_name: key.clone(),
+                category,
+                ducat: None,
+                wfm_url_name: None,
+                tradable: false,
+                icon: None,
+            });
             names.push(NameRow {
-                unique_name: raw.unique_name,
+                unique_name: key,
                 lang: "en".to_string(),
                 source: "DE",
                 name: raw.name,
@@ -111,9 +110,12 @@ pub fn assemble_catalog(
             eprintln!("fetching {mname} ({lang})");
             let value = source.fetch_manifest(entry)?;
             for raw in items_from_manifest(&value) {
-                if items.contains_key(&raw.unique_name) {
+                let category =
+                    category::derive_category(&config.categories, mname, &raw.unique_name);
+                let key = catalog_key(&category, &raw.unique_name);
+                if items.contains_key(&key) {
                     names.push(NameRow {
-                        unique_name: raw.unique_name,
+                        unique_name: key,
                         lang: lang.clone(),
                         source: "DE",
                         name: raw.name,
@@ -231,6 +233,21 @@ fn fetch_named(
         .find(|e| e.manifest == name)
         .ok_or_else(|| anyhow::anyhow!("manifest {name} not in index"))?;
     source.fetch_manifest(entry)
+}
+
+/// Relic refinement suffixes appended to relic uniqueNames (Intact/Exceptional/Flawless/Radiant).
+const RELIC_REFINEMENTS: [&str; 4] = ["Bronze", "Silver", "Gold", "Platinum"];
+
+/// Catalog key for a raw item: relics collapse to their base uniqueName.
+fn catalog_key(category: &str, unique_name: &str) -> String {
+    if category == "relic" {
+        for suffix in RELIC_REFINEMENTS {
+            if let Some(base) = unique_name.strip_suffix(suffix) {
+                return base.to_string();
+            }
+        }
+    }
+    unique_name.to_string()
 }
 
 #[cfg(test)]
