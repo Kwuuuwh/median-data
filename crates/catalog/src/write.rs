@@ -32,12 +32,24 @@ pub struct NameRow {
     pub name: String,
 }
 
+/// One set-membership row: a synthetic set and one of its member parts.
+pub struct SetMemberRow {
+    /// Synthetic set key (`median:set:<base>`).
+    pub set_unique_name: String,
+    /// Member part's catalog key.
+    pub member_unique_name: String,
+    /// How many of the member the set contains.
+    pub count: i64,
+}
+
 /// An assembled catalog ready to be written to SQLite.
 pub struct CatalogData {
     /// Item rows.
     pub items: Vec<CatalogRow>,
     /// Localized-name rows.
     pub names: Vec<NameRow>,
+    /// Set-membership rows.
+    pub set_members: Vec<SetMemberRow>,
     /// Identity of the DE index this catalog was built from.
     pub de_index_hash: String,
     /// Languages included (EN always present).
@@ -88,6 +100,18 @@ pub async fn write_catalog(path: &Path, data: &CatalogData) -> anyhow::Result<()
         .bind(&name.lang)
         .bind(name.source)
         .bind(&name.name)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    for m in &data.set_members {
+        sqlx::query(
+            "INSERT OR IGNORE INTO set_members (set_unique_name, member_unique_name, count) \
+             VALUES (?, ?, ?)",
+        )
+        .bind(&m.set_unique_name)
+        .bind(&m.member_unique_name)
+        .bind(m.count)
         .execute(&mut *tx)
         .await?;
     }

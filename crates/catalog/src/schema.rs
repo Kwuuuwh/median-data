@@ -1,5 +1,5 @@
 /// Catalog schema version. Bumped only on breaking (non-additive) changes.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// Catalog DDL, one statement per entry.
 pub const DDL_STATEMENTS: &[&str] = &[
@@ -22,6 +22,13 @@ pub const DDL_STATEMENTS: &[&str] = &[
        name        TEXT NOT NULL, \
        PRIMARY KEY (unique_name, lang, source)\
      ) WITHOUT ROWID",
+    "CREATE TABLE set_members (\
+       set_unique_name    TEXT NOT NULL, \
+       member_unique_name TEXT NOT NULL, \
+       count              INTEGER NOT NULL DEFAULT 1, \
+       PRIMARY KEY (set_unique_name, member_unique_name)\
+     ) WITHOUT ROWID",
     "CREATE INDEX idx_item_names_lang_unique ON item_names(lang, unique_name)",
     "CREATE INDEX idx_item_names_lang_name ON item_names(lang, name)",
+    "CREATE INDEX idx_set_members_member ON set_members(member_unique_name)",
 ];

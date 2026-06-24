@@ -232,25 +232,20 @@ fn probe_joins() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Fetch the WFM bridge and print a known prime part's match, with gameRef diagnostics if missing.
+/// Fetch the WFM bridge and print counts plus the `ash_prime_set` members.
 fn probe_wfm() -> anyhow::Result<()> {
-    const ASH_PRIME_CHASSIS: &str = "/Lotus/Types/Recipes/WarframeRecipes/AshPrimeChassisComponent";
     let config = Config::load(&config_dir())?;
     let agent = http_agent();
     let bridge = wfm_bridge::fetch_bridge(&agent, &config.endpoints.wfm_items_url)?;
-    println!("wfm items with gameRef: {}", bridge.len());
-    match bridge.get(ASH_PRIME_CHASSIS) {
-        Some(entry) => println!(
-            "Ash Prime Chassis wfm: {} ({:?})",
-            entry.url_name, entry.en_name
-        ),
-        None => {
-            println!(
-                "Ash Prime Chassis not matched by exact key; gameRefs containing \"AshPrime\":"
-            );
-            for (game_ref, entry) in bridge.iter().filter(|(k, _)| k.contains("AshPrime")) {
-                println!("  {game_ref} -> {} ({:?})", entry.url_name, entry.en_name);
-            }
+    println!(
+        "wfm non-set items (by gameRef): {}",
+        bridge.by_game_ref.len()
+    );
+    println!("wfm trade sets: {}", bridge.sets.len());
+    if let Some(set) = bridge.sets.iter().find(|s| s.slug == "ash_prime_set") {
+        println!("ash_prime_set members ({}):", set.members.len());
+        for m in &set.members {
+            println!("  {} | {}", m.slug, m.game_ref);
         }
     }
     Ok(())
