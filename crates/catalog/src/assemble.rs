@@ -17,7 +17,7 @@ pub fn assemble_catalog(
     let langs = normalize_langs(langs);
 
     let en_index = source.fetch_index("en")?;
-    let de_index_hash = index_hash(&en_index);
+    let de_index_hash = crate::schema::catalog_version(&index_hash(&en_index));
 
     let mut items: HashMap<String, CatalogRow> = HashMap::new();
     let mut names: Vec<NameRow> = Vec::new();

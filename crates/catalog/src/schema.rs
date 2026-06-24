@@ -32,3 +32,7 @@ pub const DDL_STATEMENTS: &[&str] = &[
     "CREATE INDEX idx_item_names_lang_name ON item_names(lang, name)",
     "CREATE INDEX idx_set_members_member ON set_members(member_unique_name)",
 ];
+
+pub fn catalog_version(de_index_hash: &str) -> String {
+    format!("{de_index_hash}.s{SCHEMA_VERSION}")
+}

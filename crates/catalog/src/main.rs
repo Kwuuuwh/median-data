@@ -130,7 +130,7 @@ fn build(args: &[String]) -> anyhow::Result<()> {
     let langs = parsed.langs.unwrap_or_else(|| config.build.langs.clone());
 
     let en_index = source.fetch_index("en")?;
-    let current_hash = index_hash(&en_index);
+    let current_hash = schema::catalog_version(&index_hash(&en_index));
     if parsed.skip_unchanged && should_skip(parsed.last_hash.as_deref(), &current_hash) {
         println!("de index unchanged; skipping rebuild ({current_hash})");
         return Ok(());
