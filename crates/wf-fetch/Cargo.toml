@@ -10,3 +10,4 @@ ureq.workspace = true
 lzma-rs.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
+scraper.workspace = true

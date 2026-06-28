@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/catalog","crates/wf-fetch"]
+members = ["crates/catalog", "crates/wf-fetch"]
 
 [workspace.package]
 edition = "2024"
@@ -19,6 +19,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # --- fetch / decode ---
 ureq = "3"
 lzma-rs = "0.3"
+scraper = "0.27"
 # --- write / compress ---
 sqlx = { version = "0.8", features = [
   "runtime-tokio",
