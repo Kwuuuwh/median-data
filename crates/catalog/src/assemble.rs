@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use wf_fetch::{IndexEntry, ManifestSource, index_hash, items_from_manifest};
 
@@ -7,7 +7,7 @@ use crate::write::{
     CatalogData, CatalogRow, DropPlaceRow, ItemDropRow, NameRow, PlaceNameRow, RelicRewardRow,
     SetMemberRow,
 };
-use crate::{category, drop_bridge, joins, wfm_bridge};
+use crate::{category, drop_bridge, joins, quality, wfm_bridge};
 
 /// Fetch DE + WFM data and assemble the in-memory catalog for `langs` (EN is always included first).
 pub fn assemble_catalog(
@@ -324,6 +324,54 @@ pub fn assemble_catalog(
     drop_places.sort_by(|a, b| a.place_ref.cmp(&b.place_ref));
     place_names.sort_by(|a, b| a.place_ref.cmp(&b.place_ref));
 
+    let tables = quality::TableCounts {
+        items: items.len() as u64,
+        item_names: names.len() as u64,
+        relic_rewards: relic_rewards.len() as u64,
+        item_drops: item_drops.len() as u64,
+        drop_places: drop_places.len() as u64,
+        place_names: place_names.len() as u64,
+    };
+
+    let item_keys: HashSet<&str> = items.iter().map(|i| i.unique_name.as_str()).collect();
+    let mut name_coverage: BTreeMap<String, quality::NameCoverage> = BTreeMap::new();
+    for lang in &langs {
+        name_coverage.insert(
+            lang.clone(),
+            quality::NameCoverage {
+                items_total: items.len() as u64,
+                named: 0,
+            },
+        );
+    }
+    let mut seen_named: HashSet<(&str, &str)> = HashSet::new();
+    for n in &names {
+        if !item_keys.contains(n.unique_name.as_str()) {
+            continue;
+        }
+        if name_coverage.contains_key(&n.lang)
+            && seen_named.insert((n.lang.as_str(), n.unique_name.as_str()))
+        {
+            if let Some(cov) = name_coverage.get_mut(&n.lang) {
+                cov.named += 1;
+            }
+        }
+    }
+
+    let quality = quality::Quality {
+        de_index_hash: de_index_hash.clone(),
+        built_at_ms,
+        tables,
+        relics_total: dt.relics.len() as u64,
+        relics_resolved: (dt.relics.len() - relic_unresolved) as u64,
+        drops_unresolved_expected: drops_unresolved_expected as u64,
+        drops_unresolved_genuine: drops_unresolved_genuine as u64,
+        name_collisions: name_index.collisions() as u64,
+        reward_name_collisions: reward_name_collisions as u64,
+        unknown_sections: dt.unknown_sections.clone(),
+        name_coverage,
+    };
+
     Ok(CatalogData {
         items,
         names,
@@ -335,6 +383,7 @@ pub fn assemble_catalog(
         de_index_hash,
         langs,
         built_at_ms,
+        quality,
     })
 }
 

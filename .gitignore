@@ -6,5 +6,6 @@
 *.sqlite-wal
 *.sqlite.zst
 catalog.de_index_hash
+*.metrics.json
 /.vscode
 temp.md

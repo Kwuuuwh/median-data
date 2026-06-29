@@ -14,6 +14,7 @@ mod compress;
 mod config;
 mod drop_bridge;
 mod joins;
+mod quality;
 mod schema;
 mod wfm_bridge;
 mod write;
@@ -155,12 +156,17 @@ fn build(args: &[String]) -> anyhow::Result<()> {
         .join("catalog.de_index_hash");
     std::fs::write(&hash_path, &data.de_index_hash)?;
 
+    let metrics_path = PathBuf::from(format!("{}.metrics.json", parsed.out));
+    let metrics_file = std::fs::File::create(&metrics_path)?;
+    serde_json::to_writer_pretty(metrics_file, &data.quality)?;
+
     println!(
-        "wrote {} items ({}, {}, {})",
+        "wrote {} items ({}, {}, {}, {})",
         data.items.len(),
         sqlite_path.display(),
         zst_path.display(),
-        hash_path.display()
+        hash_path.display(),
+        metrics_path.display()
     );
     Ok(())
 }

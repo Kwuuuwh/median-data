@@ -2,6 +2,7 @@ use std::path::Path;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
+use crate::quality::Quality;
 use crate::schema::{DDL_STATEMENTS, SCHEMA_VERSION};
 
 /// One catalog item row.
@@ -114,6 +115,8 @@ pub struct CatalogData {
     pub langs: Vec<String>,
     /// Build time, unix epoch milliseconds.
     pub built_at_ms: i64,
+    /// Quality snapshot for this build.
+    pub quality: Quality,
 }
 
 /// Write the assembled catalog to a fresh SQLite file at `path` (replacing any existing one).
@@ -228,6 +231,7 @@ pub async fn write_catalog(path: &Path, data: &CatalogData) -> anyhow::Result<()
         ("built_at", data.built_at_ms.to_string()),
         ("de_index_hash", data.de_index_hash.clone()),
         ("langs", data.langs.join(",")),
+        ("quality", serde_json::to_string(&data.quality)?),
     ];
     for (key, value) in meta {
         sqlx::query("INSERT INTO meta (key, value) VALUES (?, ?)")
