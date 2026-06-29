@@ -46,8 +46,10 @@ fn run(args: &[String]) -> anyhow::Result<()> {
         Some("probe-drops") => probe_drops(),
         Some("build") => build(&args[1..]),
         Some("validate") => validate_cmd(&args[1..]),
+        Some("diff-metrics") => diff_metrics_cmd(&args[1..]),
         _ => anyhow::bail!(
-            "usage: catalog (probe-index | probe-items | probe-joins | probe-wfm | probe-drops | build [--out PATH] [--langs en,ru] [--skip-unchanged] [--last-hash H] | validate <db>)"
+            "usage: catalog (probe-index | probe-items | probe-joins | probe-wfm | probe-drops | build [--out PATH]
+            [--langs en,ru] [--skip-unchanged] [--last-hash H] | validate <db> | diff-metrics <current.json> <baseline.json>)"
         ),
     }
 }
@@ -68,6 +70,33 @@ fn validate_cmd(args: &[String]) -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+/// Compare a current metrics sidecar against a baseline; non-zero exit on any regression.
+fn diff_metrics_cmd(args: &[String]) -> anyhow::Result<()> {
+    let (Some(current), Some(baseline)) = (args.first(), args.get(1)) else {
+        anyhow::bail!("usage: catalog diff-metrics <current.json> <baseline.json>");
+    };
+    let current = read_quality(current)?;
+    let baseline = read_quality(baseline)?;
+    let regressions = quality::diff(&current, &baseline, &quality::DiffTolerance::default());
+    if regressions.is_empty() {
+        println!("no regressions");
+        return Ok(());
+    }
+    for r in &regressions {
+        println!(
+            "REGRESSION {}: baseline {:.4} -> current {:.4}",
+            r.metric, r.baseline, r.current
+        );
+    }
+    anyhow::bail!("metrics regression: {} metric(s)", regressions.len());
+}
+
+/// Read and parse a metrics sidecar JSON into a `Quality`.
+fn read_quality(path: &str) -> anyhow::Result<quality::Quality> {
+    let text = std::fs::read_to_string(path).map_err(|e| anyhow::anyhow!("read {path}: {e}"))?;
+    serde_json::from_str(&text).map_err(|e| anyhow::anyhow!("parse {path}: {e}"))
 }
 
 /// Config directory (`CATALOG_CONFIG_DIR` or `config`).

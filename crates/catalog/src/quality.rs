@@ -47,6 +47,97 @@ pub struct Quality {
     pub name_coverage: BTreeMap<String, NameCoverage>,
 }
 
+impl Quality {
+    /// Relic resolve ratio in `[0, 1]` (0 when no relics were parsed).
+    pub fn relic_resolve_ratio(&self) -> f64 {
+        if self.relics_total == 0 {
+            0.0
+        } else {
+            self.relics_resolved as f64 / self.relics_total as f64
+        }
+    }
+}
+
+/// Tolerance for metric regression between two builds.
+pub struct DiffTolerance {
+    /// Max fractional drop in a table's row count before it is a regression (0.10 = 10%).
+    pub table_drop_frac: f64,
+    /// Max absolute drop in the relic resolve ratio before it is a regression.
+    pub relic_resolve_drop: f64,
+}
+
+impl Default for DiffTolerance {
+    fn default() -> Self {
+        Self {
+            table_drop_frac: 0.10,
+            relic_resolve_drop: 0.02,
+        }
+    }
+}
+
+/// One metric that regressed in `current` relative to `baseline`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Regression {
+    pub metric: String,
+    pub baseline: f64,
+    pub current: f64,
+}
+
+/// Compare `current` against `baseline`, one regression per metric that dropped past `tol`.
+pub fn diff(current: &Quality, baseline: &Quality, tol: &DiffTolerance) -> Vec<Regression> {
+    let mut out = Vec::new();
+
+    let tables: [(&str, u64, u64); 6] = [
+        ("items", current.tables.items, baseline.tables.items),
+        (
+            "item_names",
+            current.tables.item_names,
+            baseline.tables.item_names,
+        ),
+        (
+            "relic_rewards",
+            current.tables.relic_rewards,
+            baseline.tables.relic_rewards,
+        ),
+        (
+            "item_drops",
+            current.tables.item_drops,
+            baseline.tables.item_drops,
+        ),
+        (
+            "drop_places",
+            current.tables.drop_places,
+            baseline.tables.drop_places,
+        ),
+        (
+            "place_names",
+            current.tables.place_names,
+            baseline.tables.place_names,
+        ),
+    ];
+    for (name, cur, base) in tables {
+        if base > 0 && (cur as f64) < (base as f64) * (1.0 - tol.table_drop_frac) {
+            out.push(Regression {
+                metric: format!("table {name}"),
+                baseline: base as f64,
+                current: cur as f64,
+            });
+        }
+    }
+
+    let cur_ratio = current.relic_resolve_ratio();
+    let base_ratio = baseline.relic_resolve_ratio();
+    if base_ratio - cur_ratio > tol.relic_resolve_drop {
+        out.push(Regression {
+            metric: "relic_resolve_ratio".to_string(),
+            baseline: base_ratio,
+            current: cur_ratio,
+        });
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,5 +186,33 @@ mod tests {
         let json = serde_json::to_string(&q).unwrap();
         let back: Quality = serde_json::from_str(&json).unwrap();
         assert_eq!(q, back);
+    }
+
+    #[test]
+    fn diff_flags_table_drop() {
+        let mut base = sample();
+        base.tables.item_drops = 100;
+        let mut cur = sample();
+        cur.tables.item_drops = 60;
+        let regs = diff(&cur, &base, &DiffTolerance::default());
+        assert!(regs.iter().any(|r| r.metric == "table item_drops"));
+    }
+
+    #[test]
+    fn diff_empty_when_stable() {
+        let q = sample();
+        assert!(diff(&q, &q, &DiffTolerance::default()).is_empty());
+    }
+
+    #[test]
+    fn diff_flags_relic_resolve_drop() {
+        let mut base = sample();
+        base.relics_total = 100;
+        base.relics_resolved = 100;
+        let mut cur = sample();
+        cur.relics_total = 100;
+        cur.relics_resolved = 90;
+        let regs = diff(&cur, &base, &DiffTolerance::default());
+        assert!(regs.iter().any(|r| r.metric == "relic_resolve_ratio"));
     }
 }
