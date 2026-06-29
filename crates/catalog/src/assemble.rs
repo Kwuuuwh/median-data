@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use wf_fetch::{IndexEntry, ManifestSource, index_hash, items_from_manifest};
+use wf_fetch::{DropTables, IndexEntry, ManifestSource, RawItem, index_hash, items_from_manifest};
 
 use crate::config::Config;
 use crate::write::{
@@ -8,6 +8,30 @@ use crate::write::{
     SetMemberRow,
 };
 use crate::{category, drop_bridge, joins, quality, wfm_bridge};
+
+/// Per-manifest raw items for one language, keeping the source manifest name for categorization.
+pub struct ManifestItems {
+    pub manifest: String,
+    pub items: Vec<RawItem>,
+}
+
+/// Network-free inputs to the pure assembler core.
+pub struct AssembleInputs {
+    /// DE index identity (already schema-versioned).
+    pub de_index_hash: String,
+    /// EN item manifests in config order.
+    pub en_items: Vec<ManifestItems>,
+    /// Secondary-language item manifests, keyed by language tag.
+    pub lang_items: BTreeMap<String, Vec<ManifestItems>>,
+    /// `ExportRecipes` document (ducat + blueprint joins).
+    pub recipes: serde_json::Value,
+    /// `ExportManifest` document (icon join).
+    pub manifest: serde_json::Value,
+    /// WFM bridge (trade slugs, sets, English names).
+    pub bridge: wfm_bridge::WfmBridge,
+    /// Parsed DE drop tables.
+    pub drop_tables: DropTables,
+}
 
 /// Fetch DE + WFM data and assemble the in-memory catalog for `langs` (EN is always included first).
 pub fn assemble_catalog(
@@ -22,17 +46,78 @@ pub fn assemble_catalog(
     let en_index = source.fetch_index("en")?;
     let de_index_hash = crate::schema::catalog_version(&index_hash(&en_index));
 
-    let mut items: HashMap<String, CatalogRow> = HashMap::new();
-    let mut names: Vec<NameRow> = Vec::new();
-
+    let mut en_items = Vec::new();
     for mname in &config.build.item_manifests {
-        let mname = mname.as_str();
-        let Some(entry) = en_index.iter().find(|e| e.manifest == mname) else {
+        let Some(entry) = en_index.iter().find(|e| e.manifest == mname.as_str()) else {
             continue;
         };
         eprintln!("fetching {mname} (en)");
         let value = source.fetch_manifest(entry)?;
-        for raw in items_from_manifest(&value) {
+        en_items.push(ManifestItems {
+            manifest: mname.clone(),
+            items: items_from_manifest(&value),
+        });
+    }
+
+    eprintln!("fetching ExportRecipes (en)");
+    let recipes = fetch_named(source, &en_index, "ExportRecipes")?;
+    eprintln!("fetching ExportManifest (en)");
+    let manifest = fetch_named(source, &en_index, "ExportManifest")?;
+
+    eprintln!("fetching WFM items");
+    let bridge = wfm_bridge::fetch_bridge(wfm_agent, &config.endpoints.wfm_items_url)?;
+
+    let mut lang_items: BTreeMap<String, Vec<ManifestItems>> = BTreeMap::new();
+    for lang in langs.iter().filter(|l| l.as_str() != "en") {
+        eprintln!("fetching {lang} index");
+        let index = source.fetch_index(lang)?;
+        let mut mis = Vec::new();
+        for mname in &config.build.item_manifests {
+            let Some(entry) = index.iter().find(|e| e.manifest == mname.as_str()) else {
+                continue;
+            };
+            eprintln!("fetching {mname} ({lang})");
+            let value = source.fetch_manifest(entry)?;
+            mis.push(ManifestItems {
+                manifest: mname.clone(),
+                items: items_from_manifest(&value),
+            });
+        }
+        lang_items.insert(lang.clone(), mis);
+    }
+
+    eprintln!("fetching droptables");
+    let html = wf_fetch::fetch_droptables(wfm_agent, &config.endpoints.droptables_url)?;
+    let drop_tables = wf_fetch::parse_droptables(&html)?;
+
+    let inputs = AssembleInputs {
+        de_index_hash,
+        en_items,
+        lang_items,
+        recipes,
+        manifest,
+        bridge,
+        drop_tables,
+    };
+    Ok(assemble_from_parts(&inputs, config, &langs, built_at_ms))
+}
+
+/// Pure assembler core: build the catalog from already-fetched inputs (no network).
+pub fn assemble_from_parts(
+    inputs: &AssembleInputs,
+    config: &Config,
+    langs: &[String],
+    built_at_ms: i64,
+) -> CatalogData {
+    let langs = normalize_langs(langs);
+    let de_index_hash = inputs.de_index_hash.clone();
+
+    let mut items: HashMap<String, CatalogRow> = HashMap::new();
+    let mut names: Vec<NameRow> = Vec::new();
+
+    for mi in &inputs.en_items {
+        let mname = mi.manifest.as_str();
+        for raw in &mi.items {
             let category = category::derive_category(&config.categories, mname, &raw.unique_name);
             let key = catalog_key(&category, &raw.unique_name);
             items.entry(key.clone()).or_insert_with(|| CatalogRow {
@@ -47,25 +132,20 @@ pub fn assemble_catalog(
                 unique_name: key,
                 lang: "en".to_string(),
                 source: "DE",
-                name: raw.name,
+                name: raw.name.clone(),
             });
         }
     }
 
-    eprintln!("fetching ExportRecipes (en)");
-    let recipes = fetch_named(source, &en_index, "ExportRecipes")?;
-    eprintln!("fetching ExportManifest (en)");
-    let manifest = fetch_named(source, &en_index, "ExportManifest")?;
-    let ducats = joins::ducat_map(&recipes);
-    let icons = joins::icon_map(&manifest);
-    let blueprint_of = joins::component_blueprint_map(&recipes);
+    let ducats = joins::ducat_map(&inputs.recipes);
+    let icons = joins::icon_map(&inputs.manifest);
+    let blueprint_of = joins::component_blueprint_map(&inputs.recipes);
     for (unique_name, row) in items.iter_mut() {
         row.ducat = ducats.get(unique_name).copied();
         row.icon = icons.get(unique_name).cloned();
     }
 
-    eprintln!("fetching WFM items");
-    let bridge = wfm_bridge::fetch_bridge(wfm_agent, &config.endpoints.wfm_items_url)?;
+    let bridge = &inputs.bridge;
 
     // Assembled primes are the gameRef targets of trade sets; they stay tradable=0 (the set is the
     // tradable entity, added synthetically below) — so they are skipped by the regular bridge.
@@ -103,16 +183,12 @@ pub fn assemble_catalog(
     tracing::info!(items = items.len(), bridged, "wfm bridge applied");
 
     for lang in langs.iter().filter(|l| l.as_str() != "en") {
-        eprintln!("fetching {lang} index");
-        let index = source.fetch_index(lang)?;
-        for mname in &config.build.item_manifests {
-            let mname = mname.as_str();
-            let Some(entry) = index.iter().find(|e| e.manifest == mname) else {
-                continue;
-            };
-            eprintln!("fetching {mname} ({lang})");
-            let value = source.fetch_manifest(entry)?;
-            for raw in items_from_manifest(&value) {
+        let Some(manifests) = inputs.lang_items.get(lang) else {
+            continue;
+        };
+        for mi in manifests {
+            let mname = mi.manifest.as_str();
+            for raw in &mi.items {
                 let category =
                     category::derive_category(&config.categories, mname, &raw.unique_name);
                 let key = catalog_key(&category, &raw.unique_name);
@@ -121,7 +197,7 @@ pub fn assemble_catalog(
                         unique_name: key,
                         lang: lang.clone(),
                         source: "DE",
-                        name: raw.name,
+                        name: raw.name.clone(),
                     });
                 }
             }
@@ -190,11 +266,9 @@ pub fn assemble_catalog(
         }
     }
 
-    // Drop / relic source tables: parse the DE drop-table HTML and bridge display names.
+    // Drop / relic source tables: bridge display names from the parsed DE drop tables.
     let name_index = drop_bridge::NameIndex::build(&names);
-    eprintln!("fetching droptables");
-    let html = wf_fetch::fetch_droptables(wfm_agent, &config.endpoints.droptables_url)?;
-    let dt = wf_fetch::parse_droptables(&html)?;
+    let dt = &inputs.drop_tables;
 
     let mut relic_rewards: Vec<RelicRewardRow> = Vec::new();
     let mut relic_unresolved = 0usize;
@@ -372,7 +446,7 @@ pub fn assemble_catalog(
         name_coverage,
     };
 
-    Ok(CatalogData {
+    CatalogData {
         items,
         names,
         set_members,
@@ -384,7 +458,7 @@ pub fn assemble_catalog(
         langs,
         built_at_ms,
         quality,
-    })
+    }
 }
 
 /// Normalize a requested language list: lowercase, de-duplicated, with `en` forced first.
@@ -452,6 +526,9 @@ fn is_expected_unresolved(display_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{BuildConfig, Categories, Endpoints};
+    use crate::wfm_bridge::{WfmBridge, WfmEntry, WfmMember, WfmSet};
+    use wf_fetch::{ItemDrop, PlaceKind, Refinement, RelicReward};
 
     #[test]
     fn normalize_forces_en_first_and_dedups() {
@@ -470,5 +547,180 @@ mod tests {
         assert!(is_expected_unresolved("Endo"));
         assert!(!is_expected_unresolved("Akstiletto Prime Barrel"));
         assert!(!is_expected_unresolved("Kuva Bramma"));
+    }
+
+    fn golden_config() -> Config {
+        Config {
+            endpoints: Endpoints {
+                de_index_base: "https://x/index_".into(),
+                de_manifest_base: "https://x/Manifest/".into(),
+                wfm_items_url: "https://x/items".into(),
+                droptables_url: "https://x/droptables".into(),
+                wfcd_relics_url: "https://x/relics".into(),
+            },
+            categories: Categories {
+                default: "other".into(),
+                manifests: vec![],
+            },
+            build: BuildConfig {
+                langs: vec!["en".into(), "ru".into()],
+                item_manifests: vec!["ExportWeapons".into()],
+            },
+        }
+    }
+
+    fn golden_inputs() -> AssembleInputs {
+        let en_items = vec![ManifestItems {
+            manifest: "ExportWeapons".to_string(),
+            items: vec![
+                RawItem {
+                    unique_name: "/Lotus/Relics/AxiA1".into(),
+                    name: "Axi A1 Relic".into(),
+                },
+                RawItem {
+                    unique_name: "/Lotus/Weapons/AkstilettoPrimeBarrel".into(),
+                    name: "Akstiletto Prime Barrel".into(),
+                },
+                RawItem {
+                    unique_name: "/Lotus/Weapons/NikanaPrime".into(),
+                    name: "Nikana Prime".into(),
+                },
+            ],
+        }];
+
+        let mut lang_items = BTreeMap::new();
+        lang_items.insert(
+            "ru".to_string(),
+            vec![ManifestItems {
+                manifest: "ExportWeapons".to_string(),
+                items: vec![RawItem {
+                    unique_name: "/Lotus/Weapons/NikanaPrime".into(),
+                    name: "Никана Прайм".into(),
+                }],
+            }],
+        );
+
+        let mut by_game_ref = HashMap::new();
+        by_game_ref.insert(
+            "/Lotus/Weapons/NikanaPrime".to_string(),
+            WfmEntry {
+                url_name: "nikana_prime".into(),
+                en_name: Some("Nikana Prime".into()),
+            },
+        );
+
+        let bridge = WfmBridge {
+            by_game_ref,
+            sets: vec![WfmSet {
+                base: "nikana_prime".into(),
+                slug: "nikana_prime_set".into(),
+                game_ref: "/Lotus/Weapons/NikanaPrimeSet".into(),
+                en_name: Some("Nikana Prime Set".into()),
+                members: vec![WfmMember {
+                    slug: "nikana_prime_blade".into(),
+                    game_ref: "/Lotus/Weapons/NikanaPrimeBlade".into(),
+                    en_name: Some("Nikana Prime Blade".into()),
+                }],
+            }],
+        };
+
+        let drop_tables = DropTables {
+            relics: vec![RelicReward {
+                relic_name: "Axi A1 Relic".into(),
+                refinement: Refinement::Intact,
+                reward_name: "Akstiletto Prime Barrel".into(),
+                rarity: "Uncommon".into(),
+                chance: 0.11,
+            }],
+            drops: vec![
+                ItemDrop {
+                    item_name: "Nikana Prime".into(),
+                    place_name: "Mercury/Tolstoj (Assassination)".into(),
+                    place_kind: PlaceKind::Node,
+                    rotation: None,
+                    stage: None,
+                    rarity: "Common".into(),
+                    chance: 0.20,
+                    source: "missionRewards".into(),
+                },
+                ItemDrop {
+                    item_name: "100 Endo".into(),
+                    place_name: "Mercury/Apollodorus (Survival)".into(),
+                    place_kind: PlaceKind::Node,
+                    rotation: Some("A".into()),
+                    stage: None,
+                    rarity: "Common".into(),
+                    chance: 0.5,
+                    source: "missionRewards".into(),
+                },
+                ItemDrop {
+                    item_name: "Akstiletto Prime Receiver".into(),
+                    place_name: "Mercury/Apollodorus (Survival)".into(),
+                    place_kind: PlaceKind::Node,
+                    rotation: Some("B".into()),
+                    stage: None,
+                    rarity: "Rare".into(),
+                    chance: 0.05,
+                    source: "missionRewards".into(),
+                },
+            ],
+            unknown_sections: vec![],
+        };
+
+        AssembleInputs {
+            de_index_hash: "golden.s3".to_string(),
+            en_items,
+            lang_items,
+            recipes: serde_json::json!({}),
+            manifest: serde_json::json!({}),
+            bridge,
+            drop_tables,
+        }
+    }
+
+    #[test]
+    fn golden_assemble_from_parts() {
+        let config = golden_config();
+        let inputs = golden_inputs();
+        let data = assemble_from_parts(&inputs, &config, &config.build.langs, 1234);
+
+        assert_eq!(data.items.len(), 5);
+        assert_eq!(data.langs, vec!["en", "ru"]);
+        assert_eq!(data.de_index_hash, "golden.s3");
+
+        assert_eq!(data.relic_rewards.len(), 1);
+        let rr = &data.relic_rewards[0];
+        assert_eq!(rr.relic_unique_name, "/Lotus/Relics/AxiA1");
+        assert_eq!(
+            rr.reward_unique_name,
+            "/Lotus/Weapons/AkstilettoPrimeBarrel"
+        );
+        assert_eq!(rr.refinement, "intact");
+
+        assert_eq!(data.item_drops.len(), 1);
+        assert_eq!(
+            data.item_drops[0].item_unique_name,
+            "/Lotus/Weapons/NikanaPrime"
+        );
+
+        assert_eq!(data.set_members.len(), 1);
+        assert_eq!(
+            data.set_members[0].set_unique_name,
+            "median:set:nikana_prime"
+        );
+        assert_eq!(
+            data.set_members[0].member_unique_name,
+            "/Lotus/Weapons/NikanaPrimeBlade"
+        );
+
+        let q = &data.quality;
+        assert_eq!(q.tables.items, 5);
+        assert_eq!(q.relics_total, 1);
+        assert_eq!(q.relics_resolved, 1);
+        assert_eq!(q.drops_unresolved_expected, 1);
+        assert_eq!(q.drops_unresolved_genuine, 1);
+        assert_eq!(q.name_coverage["en"].named, 5);
+        assert_eq!(q.name_coverage["en"].items_total, 5);
+        assert_eq!(q.name_coverage["ru"].named, 1);
     }
 }

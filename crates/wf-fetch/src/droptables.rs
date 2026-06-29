@@ -385,7 +385,40 @@ fn parse_relic_header(s: &str) -> Option<(String, Refinement)> {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
+
     use super::*;
+
+    proptest! {
+        #[test]
+        fn prop_rarity_chance_roundtrips(
+            rarity in "[A-Za-z][A-Za-z ]{0,20}",
+            pct in 0.0f64..100.0,
+        ) {
+            let rarity_trimmed = rarity.trim().to_string();
+            prop_assume!(!rarity_trimmed.is_empty());
+            let cell = format!("{rarity_trimmed} ({pct:.2}%)");
+            let (parsed_rarity, chance) =
+                parse_rarity_chance(&cell).expect("formatted cell parses");
+            let expected = format!("{pct:.2}").parse::<f64>().unwrap() / 100.0;
+            prop_assert_eq!(parsed_rarity, rarity_trimmed);
+            prop_assert!((chance - expected).abs() < 1e-9);
+            prop_assert!((0.0..=1.0).contains(&chance));
+        }
+
+        #[test]
+        fn prop_relic_header_parses_known_tiers(
+            name in "[A-Za-z][A-Za-z0-9 ]{0,20}",
+            tier in prop::sample::select(vec!["Intact", "Exceptional", "Flawless", "Radiant"]),
+        ) {
+            let name_trimmed = name.trim().to_string();
+            prop_assume!(!name_trimmed.is_empty());
+            let header = format!("{name_trimmed} ({tier})");
+            let (parsed_name, _refinement) =
+                parse_relic_header(&header).expect("formatted header parses");
+            prop_assert_eq!(parsed_name, name_trimmed);
+        }
+    }
 
     #[test]
     fn parses_rarity_and_fractional_chance() {

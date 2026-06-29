@@ -38,6 +38,7 @@ tokio = { version = "1", features = [
 zstd = "0.13"
 # --- dev ---
 ruzstd = "0.8"
+proptest = "1"
 # --- internal ---
 wf-fetch = { path = "crates/wf-fetch" }
 
