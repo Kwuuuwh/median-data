@@ -16,6 +16,7 @@ pub struct Endpoints {
     pub de_manifest_base: String,
     pub wfm_items_url: String,
     pub droptables_url: String,
+    pub wfcd_relics_url: String,
 }
 
 /// Category-derivation rules keyed by source manifest, with a global fallback.
@@ -77,6 +78,7 @@ impl Config {
             ),
             ("endpoints.wfm_items_url", &self.endpoints.wfm_items_url),
             ("endpoints.droptables_url", &self.endpoints.droptables_url),
+            ("endpoints.wfcd_relics_url", &self.endpoints.wfcd_relics_url),
         ] {
             if !value.starts_with("https://") {
                 anyhow::bail!("config: {field} must be an https:// URL, got {value:?}");
@@ -131,6 +133,7 @@ mod tests {
                 de_manifest_base: "https://x/Manifest/".into(),
                 wfm_items_url: "https://x/items".into(),
                 droptables_url: "https://x/droptables".into(),
+                wfcd_relics_url: "https://x/relics".into(),
             },
             categories: Categories {
                 default: "other".into(),

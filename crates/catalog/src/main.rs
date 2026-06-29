@@ -14,6 +14,7 @@ mod compress;
 mod config;
 mod drop_bridge;
 mod joins;
+mod oracle;
 mod quality;
 mod schema;
 mod validate;
@@ -47,8 +48,9 @@ fn run(args: &[String]) -> anyhow::Result<()> {
         Some("build") => build(&args[1..]),
         Some("validate") => validate_cmd(&args[1..]),
         Some("diff-metrics") => diff_metrics_cmd(&args[1..]),
+        Some("probe-oracle") => probe_oracle(),
         _ => anyhow::bail!(
-            "usage: catalog (probe-index | probe-items | probe-joins | probe-wfm | probe-drops | build [--out PATH]
+            "usage: catalog (probe-index | probe-items | probe-joins | probe-wfm | probe-drops | probe-oracle | build [--out PATH]
             [--langs en,ru] [--skip-unchanged] [--last-hash H] | validate <db> | diff-metrics <current.json> <baseline.json>)"
         ),
     }
@@ -382,6 +384,15 @@ fn probe_drops() -> anyhow::Result<()> {
         println!("  unresolved: {n}");
     }
     Ok(())
+}
+
+/// Fetch our drop tables and WFCD relics and print the oracle diff (diagnostic; always exit 0).
+fn probe_oracle() -> anyhow::Result<()> {
+    let config = Config::load(&config_dir())?;
+    let agent = http_agent();
+    let html = wf_fetch::fetch_droptables(&agent, &config.endpoints.droptables_url)?;
+    let dt = wf_fetch::parse_droptables(&html)?;
+    oracle::report(&agent, &config.endpoints.wfcd_relics_url, &dt)
 }
 
 /// Fetch and parse a manifest by name from the index.
