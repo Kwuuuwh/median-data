@@ -16,6 +16,7 @@ mod drop_bridge;
 mod joins;
 mod quality;
 mod schema;
+mod validate;
 mod wfm_bridge;
 mod write;
 
@@ -44,10 +45,29 @@ fn run(args: &[String]) -> anyhow::Result<()> {
         Some("probe-wfm") => probe_wfm(),
         Some("probe-drops") => probe_drops(),
         Some("build") => build(&args[1..]),
+        Some("validate") => validate_cmd(&args[1..]),
         _ => anyhow::bail!(
-            "usage: catalog (probe-index | probe-items | probe-joins | probe-wfm | probe-drops | build [--out PATH] [--langs en,ru] [--skip-unchanged] [--last-hash H])"
+            "usage: catalog (probe-index | probe-items | probe-joins | probe-wfm | probe-drops | build [--out PATH] [--langs en,ru] [--skip-unchanged] [--last-hash H] | validate <db>)"
         ),
     }
+}
+
+/// Validate a built catalog; non-zero exit on any hard failure.
+fn validate_cmd(args: &[String]) -> anyhow::Result<()> {
+    let path = args
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("usage: catalog validate <db>"))?;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let report = rt.block_on(validate::run(Path::new(path)))?;
+    if !report.passed() {
+        anyhow::bail!(
+            "catalog validation failed: {} issue(s)",
+            report.failures.len()
+        );
+    }
+    Ok(())
 }
 
 /// Config directory (`CATALOG_CONFIG_DIR` or `config`).
