@@ -43,7 +43,7 @@ jobs:
           if [ -f catalog.sqlite ]; then
             cargo run -p catalog --release -- validate catalog.sqlite
             if [ -f prev/catalog.sqlite.metrics.json ]; then
-              cargo run -p catalog release -- diff-metrics catalog.sqlite.metrics.json prev/catalog.sqlite.metrics.json
+              cargo run -p catalog --release -- diff-metrics catalog.sqlite.metrics.json prev/catalog.sqlite.metrics.json
             else
               echo "no baseline metrics; skipping diff-metrics"
             fi

@@ -1,5 +1,5 @@
 /// Catalog schema version. Bumped only on breaking (non-additive) changes.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 /// Catalog DDL, one statement per entry.
 pub const DDL_STATEMENTS: &[&str] = &[
