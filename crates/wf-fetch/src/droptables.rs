@@ -100,6 +100,8 @@ pub struct ItemDrop {
 pub struct DropTables {
     pub relics: Vec<RelicReward>,
     pub drops: Vec<ItemDrop>,
+    /// Section ids that carried a table but the parser does not handle.
+    pub unknown_sections: Vec<String>,
 }
 
 /// Fetch the drop-table HTML as text, following the landing redirect.
@@ -141,9 +143,11 @@ pub fn parse_droptables(html: &str) -> anyhow::Result<DropTables> {
             "modByDrop" | "blueprintByDrop" | "resourceByDrop" => {
                 parse_by_drop(&sel, table, id, &mut out.drops)
             }
-            _ => {}
+            _ => out.unknown_sections.push(id.to_string()),
         }
     }
+    out.unknown_sections.sort();
+    out.unknown_sections.dedup();
     Ok(out)
 }
 
@@ -421,33 +425,33 @@ mod tests {
     }
 
     const FIXTURE: &str = r#"
-<html><body>
-<h3 id="relicRewards">Relics:</h3>
-<table>
-<tr><th colspan="2">Axi A1 Relic (Intact)</th></tr><tr><td>Akstiletto Prime Barrel</td><td>Uncommon (11.00%)</td></tr><tr><td>Nikana Prime Blueprint</td><td>Rare (2.00%)</td></tr>
-<tr class="blank-row"><td class="blank-row" colspan="2"></td></tr>
-<tr><th colspan="2">Axi A1 Relic (Radiant)</th></tr><tr><td>Akstiletto Prime Barrel</td><td>Uncommon (20.00%)</td></tr>
-</table>
-<h3 id="missionRewards">Missions:</h3>
-<table>
-<tr><th colspan="2">Mercury/Apollodorus (Survival)</th></tr><tr><th colspan="2">Rotation A</th></tr><tr><td>100 Endo</td><td>Common (50.00%)</td></tr><tr><th colspan="2">Rotation B</th></tr><tr><td>Lith Q3 Relic</td><td>Rare (7.69%)</td></tr>
-<tr class="blank-row"><td class="blank-row" colspan="2"></td></tr>
-<tr><th colspan="2">Mercury/Tolstoj (Assassination)</th></tr><tr><td>Seer Blueprint</td><td>Common (38.72%)</td></tr>
-</table>
-<h3 id="modByDrop">Mod Drops by Mod:</h3>
-<table>
-<tr><th colspan="3">Target Acquired</th></tr>
-<tr><th>Source</th><th>Mod Drop Chance</th><th>Chance</th></tr>
-<tr><td>Tusk Thumper Bull</td><td>15.00%</td><td>Uncommon (12.50%)</td></tr>
-<tr class="blank-row"><td class="blank-row" colspan="3"></td></tr>
-</table>
-<h3 id="relicByAvatar">Relic Drops by Source:</h3>
-<table>
-<tr><th>Hemocyte</th><th colspan="2">Relic Drop Chance: 20.00%</th></tr><tr><td></td><td>Lith K12 Relic</td><td>Uncommon (12.91%)</td></tr>
-<tr class="blank-row"><td class="blank-row" colspan="3"></td></tr>
-</table>
-</body></html>
-"#;
+        <html><body>
+        <h3 id="relicRewards">Relics:</h3>
+        <table>
+        <tr><th colspan="2">Axi A1 Relic (Intact)</th></tr><tr><td>Akstiletto Prime Barrel</td><td>Uncommon (11.00%)</td></tr><tr><td>Nikana Prime Blueprint</td><td>Rare (2.00%)</td></tr>
+        <tr class="blank-row"><td class="blank-row" colspan="2"></td></tr>
+        <tr><th colspan="2">Axi A1 Relic (Radiant)</th></tr><tr><td>Akstiletto Prime Barrel</td><td>Uncommon (20.00%)</td></tr>
+        </table>
+        <h3 id="missionRewards">Missions:</h3>
+        <table>
+        <tr><th colspan="2">Mercury/Apollodorus (Survival)</th></tr><tr><th colspan="2">Rotation A</th></tr><tr><td>100 Endo</td><td>Common (50.00%)</td></tr><tr><th colspan="2">Rotation B</th></tr><tr><td>Lith Q3 Relic</td><td>Rare (7.69%)</td></tr>
+        <tr class="blank-row"><td class="blank-row" colspan="2"></td></tr>
+        <tr><th colspan="2">Mercury/Tolstoj (Assassination)</th></tr><tr><td>Seer Blueprint</td><td>Common (38.72%)</td></tr>
+        </table>
+        <h3 id="modByDrop">Mod Drops by Mod:</h3>
+        <table>
+        <tr><th colspan="3">Target Acquired</th></tr>
+        <tr><th>Source</th><th>Mod Drop Chance</th><th>Chance</th></tr>
+        <tr><td>Tusk Thumper Bull</td><td>15.00%</td><td>Uncommon (12.50%)</td></tr>
+        <tr class="blank-row"><td class="blank-row" colspan="3"></td></tr>
+        </table>
+        <h3 id="relicByAvatar">Relic Drops by Source:</h3>
+        <table>
+        <tr><th>Hemocyte</th><th colspan="2">Relic Drop Chance: 20.00%</th></tr><tr><td></td><td>Lith K12 Relic</td><td>Uncommon (12.91%)</td></tr>
+        <tr class="blank-row"><td class="blank-row" colspan="3"></td></tr>
+        </table>
+        </body></html>
+        "#;
 
     #[test]
     fn parses_relics_per_refinement() {
@@ -509,5 +513,26 @@ mod tests {
         assert_eq!(by_avatar.item_name, "Lith K12 Relic");
         assert_eq!(by_avatar.place_name, "Hemocyte");
         assert_eq!(by_avatar.place_kind, PlaceKind::Enemy);
+    }
+
+    const UNKNOWN_FIXTURE: &str = r#"
+        <html><body>
+        <h3 id="newMystery">Mystery:</h3>
+        <table><tr><th colspan="2">Whatever (Intact)</th></tr><tr><td>Thing</td><td>Common (1.00%)</td></tr></table>
+        <h3 id="missionRewards">Missions:</h3>
+        <table><tr><th colspan="2">Mercury/Tolstoj (Assassination)</th></tr><tr><td>Seer Blueprint</td><td>Common (38.72%)</td></tr></table>
+        </body></html>
+        "#;
+
+    #[test]
+    fn records_unknown_sections() {
+        let dt = parse_droptables(UNKNOWN_FIXTURE).unwrap();
+        assert_eq!(dt.unknown_sections, vec!["newMystery".to_string()]);
+    }
+
+    #[test]
+    fn known_fixture_has_no_unknown_sections() {
+        let dt = parse_droptables(FIXTURE).unwrap();
+        assert!(dt.unknown_sections.is_empty());
     }
 }
