@@ -33,10 +33,16 @@ pub struct Quality {
     pub relics_total: u64,
     /// Relic reward lines that resolved both ends to catalog keys.
     pub relics_resolved: u64,
+    /// Unresolved relic rewards classified as expected non-catalog pickups.
+    pub relics_unresolved_expected: u64,
+    /// Unresolved relic rewards classified as genuine misses.
+    pub relics_unresolved_genuine: u64,
     /// Unresolved drops classified as expected non-catalog pickups.
     pub drops_unresolved_expected: u64,
     /// Unresolved drops classified as genuine misses.
     pub drops_unresolved_genuine: u64,
+    /// Drop rows skipped for non-positive chance (source placeholders).
+    pub drops_zero_chance: u64,
     /// Display names seen mapping to more than one `uniqueName`.
     pub name_collisions: u64,
     /// Resolved relic reward lines whose display name was colliding.
@@ -54,6 +60,16 @@ impl Quality {
             0.0
         } else {
             self.relics_resolved as f64 / self.relics_total as f64
+        }
+    }
+
+    /// Effective relic resolve: resolved plus expected non-catalog rewards, over total.
+    pub fn effective_resolve_ratio(&self) -> f64 {
+        if self.relics_total == 0 {
+            0.0
+        } else {
+            (self.relics_resolved + self.relics_unresolved_expected) as f64
+                / self.relics_total as f64
         }
     }
 }
@@ -171,8 +187,11 @@ mod tests {
             },
             relics_total: 5,
             relics_resolved: 5,
+            relics_unresolved_expected: 0,
+            relics_unresolved_genuine: 0,
             drops_unresolved_expected: 1,
             drops_unresolved_genuine: 0,
+            drops_zero_chance: 0,
             name_collisions: 0,
             reward_name_collisions: 0,
             unknown_sections: vec![],

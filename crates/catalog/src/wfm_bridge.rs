@@ -8,6 +8,8 @@ pub struct WfmEntry {
     pub url_name: String,
     /// English name from WFM `i18n.en.name`, if present.
     pub en_name: Option<String>,
+    /// Russian name from WFM `i18n.ru.name`, if present.
+    pub ru_name: Option<String>,
 }
 
 /// One member part of a trade set, as named on WFM.
@@ -19,6 +21,8 @@ pub struct WfmMember {
     pub game_ref: String,
     /// English name from WFM, if present.
     pub en_name: Option<String>,
+    /// Russian name from WFM, if present.
+    pub ru_name: Option<String>,
 }
 
 /// A WFM trade set: its slug base, the assembled item it points at, and its member parts.
@@ -32,6 +36,8 @@ pub struct WfmSet {
     pub game_ref: String,
     /// English set name from WFM, if present.
     pub en_name: Option<String>,
+    /// Russian set name from WFM, if present.
+    pub ru_name: Option<String>,
     /// Member parts of the set.
     pub members: Vec<WfmMember>,
 }
@@ -50,6 +56,7 @@ pub fn fetch_bridge(agent: &ureq::Agent, items_url: &str) -> anyhow::Result<WfmB
     let mut res = agent
         .get(items_url)
         .header("User-Agent", wf_fetch::USER_AGENT)
+        .header("Language", "ru")
         .call()
         .map_err(|e| anyhow::anyhow!("GET {items_url}: {e}"))?;
     let mut buf = Vec::new();
@@ -58,11 +65,21 @@ pub fn fetch_bridge(agent: &ureq::Agent, items_url: &str) -> anyhow::Result<WfmB
     Ok(bridge_from_items(&value))
 }
 
+/// Extract `i18n.<lang>.name` from a WFM item.
+fn i18n_name(item: &serde_json::Value, lang: &str) -> Option<String> {
+    item.get("i18n")
+        .and_then(|i| i.get(lang))
+        .and_then(|e| e.get("name"))
+        .and_then(|n| n.as_str())
+        .map(String::from)
+}
+
 /// A flat view of one WFM item used while splitting the response.
 struct RawWfm {
     slug: String,
     game_ref: String,
     en_name: Option<String>,
+    ru_name: Option<String>,
     is_set: bool,
 }
 
@@ -82,12 +99,8 @@ pub fn bridge_from_items(value: &serde_json::Value) -> WfmBridge {
             .and_then(|x| x.as_str())
             .unwrap_or("")
             .to_string();
-        let en_name = item
-            .get("i18n")
-            .and_then(|i| i.get("en"))
-            .and_then(|e| e.get("name"))
-            .and_then(|n| n.as_str())
-            .map(String::from);
+        let en_name = i18n_name(item, "en");
+        let ru_name = i18n_name(item, "ru");
         let is_set = item
             .get("tags")
             .and_then(|t| t.as_array())
@@ -96,6 +109,7 @@ pub fn bridge_from_items(value: &serde_json::Value) -> WfmBridge {
             slug: slug.to_string(),
             game_ref,
             en_name,
+            ru_name,
             is_set,
         });
     }
@@ -107,6 +121,7 @@ pub fn bridge_from_items(value: &serde_json::Value) -> WfmBridge {
             WfmEntry {
                 url_name: r.slug.clone(),
                 en_name: r.en_name.clone(),
+                ru_name: r.ru_name.clone(),
             },
         );
     }
@@ -124,6 +139,7 @@ pub fn bridge_from_items(value: &serde_json::Value) -> WfmBridge {
                 slug: m.slug.clone(),
                 game_ref: m.game_ref.clone(),
                 en_name: m.en_name.clone(),
+                ru_name: m.ru_name.clone(),
             })
             .collect();
         sets.push(WfmSet {
@@ -131,6 +147,7 @@ pub fn bridge_from_items(value: &serde_json::Value) -> WfmBridge {
             slug: s.slug.clone(),
             game_ref: s.game_ref.clone(),
             en_name: s.en_name.clone(),
+            ru_name: s.ru_name.clone(),
             members,
         });
     }
@@ -147,7 +164,7 @@ mod tests {
         let value = serde_json::json!({
             "data": [
                 { "slug": "ash_prime_set", "gameRef": "/Lotus/Powersuits/Ninja/AshPrime", "tags": ["set","prime","warframe"], "i18n": { "en": { "name": "Ash Prime Set" } } },
-                { "slug": "ash_prime_blueprint", "gameRef": "/Lotus/Types/Recipes/WarframeRecipes/AshPrimeBlueprint", "tags": ["blueprint","prime","warframe"], "i18n": { "en": { "name": "Ash Prime Blueprint" } } },
+                { "slug": "ash_prime_blueprint", "gameRef": "/Lotus/Types/Recipes/WarframeRecipes/AshPrimeBlueprint", "tags": ["blueprint","prime","warframe"], "i18n": { "en": { "name": "Ash Prime Blueprint" }, "ru": { "name": "Аш Прайм (чертёж)" } } },
                 { "slug": "ash_prime_chassis_blueprint", "gameRef": "/Lotus/Types/Recipes/WarframeRecipes/AshPrimeChassisBlueprint", "tags": ["component","prime","warframe","blueprint"], "i18n": { "en": { "name": "Ash Prime Chassis" } } },
                 { "slug": "braton_prime_barrel", "gameRef": "/Lotus/X/BratonPrimeBarrel", "tags": ["component","prime"], "i18n": { "en": { "name": "Braton Prime Barrel" } } }
             ]
@@ -158,6 +175,12 @@ mod tests {
             bridge
                 .by_game_ref
                 .contains_key("/Lotus/Types/Recipes/WarframeRecipes/AshPrimeBlueprint")
+        );
+        assert_eq!(
+            bridge.by_game_ref["/Lotus/Types/Recipes/WarframeRecipes/AshPrimeBlueprint"]
+                .ru_name
+                .as_deref(),
+            Some("Аш Прайм (чертёж)")
         );
         assert!(
             !bridge

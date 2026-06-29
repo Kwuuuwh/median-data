@@ -211,13 +211,12 @@ async fn check(pool: &SqlitePool, t: &Thresholds) -> anyhow::Result<Report> {
         let ru_gap = count(
             pool,
             "SELECT count(*) FROM items \
-             WHERE unique_name NOT LIKE 'median:set:%' \
-               AND unique_name NOT IN (SELECT unique_name FROM item_names WHERE lang = 'ru')",
+             WHERE unique_name NOT IN (SELECT unique_name FROM item_names WHERE lang = 'ru')",
         )
         .await?;
         if ru_gap > t.ru_name_gap_budget {
             report.fail(format!(
-                "items without a ru name (excl. sets): {ru_gap} > budget {}",
+                "items without a ru name: {ru_gap} > budget {}",
                 t.ru_name_gap_budget
             ));
         }
@@ -235,10 +234,17 @@ async fn check(pool: &SqlitePool, t: &Thresholds) -> anyhow::Result<Report> {
                 ));
             }
             if q.relics_total > 0 {
-                let ratio = q.relics_resolved as f64 / q.relics_total as f64;
-                if ratio < t.relic_resolve_min {
+                let effective = q.effective_resolve_ratio();
+                if effective < t.relic_resolve_min {
                     report.fail(format!(
-                        "relic resolve ratio {ratio:.4} < min {}",
+                        "effective relic resolve {effective:.4} < min {}",
+                        t.relic_resolve_min
+                    ));
+                }
+                let raw = q.relic_resolve_ratio();
+                if raw < t.relic_resolve_min {
+                    report.warn(format!(
+                        "raw relic resolve {raw:.4} below {}",
                         t.relic_resolve_min
                     ));
                 }
@@ -341,8 +347,11 @@ mod tests {
             },
             relics_total: 1,
             relics_resolved: 1,
+            relics_unresolved_expected: 0,
+            relics_unresolved_genuine: 0,
             drops_unresolved_expected: 0,
             drops_unresolved_genuine: 0,
+            drops_zero_chance: 0,
             name_collisions: 0,
             reward_name_collisions: 0,
             unknown_sections: vec![],

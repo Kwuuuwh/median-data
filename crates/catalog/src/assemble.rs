@@ -110,6 +110,7 @@ pub fn assemble_from_parts(
     built_at_ms: i64,
 ) -> CatalogData {
     let langs = normalize_langs(langs);
+    let want_ru = langs.iter().any(|l| l.as_str() == "ru");
     let de_index_hash = inputs.de_index_hash.clone();
 
     let mut items: HashMap<String, CatalogRow> = HashMap::new();
@@ -178,6 +179,16 @@ pub fn assemble_from_parts(
                     name: en_name.clone(),
                 });
             }
+            if want_ru {
+                if let Some(ru_name) = &entry.ru_name {
+                    names.push(NameRow {
+                        unique_name: unique_name.clone(),
+                        lang: "ru".to_string(),
+                        source: "WFM",
+                        name: ru_name.clone(),
+                    });
+                }
+            }
         }
     }
     tracing::info!(items = items.len(), bridged, "wfm bridge applied");
@@ -233,6 +244,16 @@ pub fn assemble_from_parts(
                 name: en.clone(),
             });
         }
+        if want_ru {
+            if let Some(ru) = &set.ru_name {
+                names.push(NameRow {
+                    unique_name: set_key.clone(),
+                    lang: "ru".to_string(),
+                    source: "WFM",
+                    name: ru.clone(),
+                });
+            }
+        }
         for member in &set.members {
             let member_key = if let Some(existing) = reverse.get(&member.slug) {
                 existing.clone()
@@ -254,6 +275,16 @@ pub fn assemble_from_parts(
                         name: en.clone(),
                     });
                 }
+                if want_ru {
+                    if let Some(ru) = &member.ru_name {
+                        names.push(NameRow {
+                            unique_name: key.clone(),
+                            lang: "ru".to_string(),
+                            source: "WFM",
+                            name: ru.clone(),
+                        });
+                    }
+                }
                 key
             } else {
                 continue;
@@ -271,19 +302,30 @@ pub fn assemble_from_parts(
     let dt = &inputs.drop_tables;
 
     let mut relic_rewards: Vec<RelicRewardRow> = Vec::new();
+    let mut relics_resolved = 0usize;
     let mut relic_unresolved = 0usize;
+    let mut relics_unresolved_expected = 0usize;
+    let mut relics_unresolved_genuine = 0usize;
     let mut reward_name_collisions = 0usize;
     for r in &dt.relics {
-        let (Some(relic_uid), Some(reward_uid)) = (
-            name_index.resolve(&r.relic_name),
-            name_index.resolve(&r.reward_name),
-        ) else {
+        if r.chance <= 0.0 {
+            continue;
+        }
+        let relic_uid = name_index.resolve(&r.relic_name);
+        let reward_uid = name_index.resolve(&r.reward_name);
+        let (Some(relic_uid), Some(reward_uid)) = (relic_uid, reward_uid) else {
             relic_unresolved += 1;
+            if relic_uid.is_some() && is_expected_unresolved(&r.reward_name) {
+                relics_unresolved_expected += 1;
+            } else {
+                relics_unresolved_genuine += 1;
+            }
             continue;
         };
         if name_index.is_colliding(&r.reward_name) || name_index.is_colliding(&r.relic_name) {
             reward_name_collisions += 1;
         }
+        relics_resolved += 1;
         relic_rewards.push(RelicRewardRow {
             relic_unique_name: relic_uid.to_string(),
             reward_unique_name: reward_uid.to_string(),
@@ -299,7 +341,12 @@ pub fn assemble_from_parts(
     let mut drop_unresolved = 0usize;
     let mut drops_unresolved_expected = 0usize;
     let mut drops_unresolved_genuine = 0usize;
+    let mut drops_zero_chance = 0usize;
     for d in &dt.drops {
+        if d.chance <= 0.0 {
+            drops_zero_chance += 1;
+            continue;
+        }
         let Some(item_uid) = name_index.resolve(&d.item_name) else {
             drop_unresolved += 1;
             if is_expected_unresolved(&d.item_name) {
@@ -345,11 +392,13 @@ pub fn assemble_from_parts(
     tracing::info!(
         relics = relic_rewards.len(),
         relic_unresolved,
+        relics_unresolved_genuine,
         reward_name_collisions,
         drops = item_drops.len(),
         drop_unresolved,
         drops_unresolved_expected,
         drops_unresolved_genuine,
+        drops_zero_chance,
         places = drop_places.len(),
         name_collisions = name_index.collisions(),
         "drop tables assembled"
@@ -437,9 +486,12 @@ pub fn assemble_from_parts(
         built_at_ms,
         tables,
         relics_total: dt.relics.len() as u64,
-        relics_resolved: (dt.relics.len() - relic_unresolved) as u64,
+        relics_resolved: relics_resolved as u64,
+        relics_unresolved_expected: relics_unresolved_expected as u64,
+        relics_unresolved_genuine: relics_unresolved_genuine as u64,
         drops_unresolved_expected: drops_unresolved_expected as u64,
         drops_unresolved_genuine: drops_unresolved_genuine as u64,
+        drops_zero_chance: drops_zero_chance as u64,
         name_collisions: name_index.collisions() as u64,
         reward_name_collisions: reward_name_collisions as u64,
         unknown_sections: dt.unknown_sections.clone(),
@@ -510,8 +562,10 @@ fn is_expected_unresolved(display_name: &str) -> bool {
         return true;
     }
     let first = trimmed.split_whitespace().next().unwrap_or_default();
-    let numeric_prefix = first.chars().any(|c| c.is_ascii_digit())
-        && first.chars().all(|c| c.is_ascii_digit() || c == ',');
+    let qty = first.trim_end_matches(['x', 'X']);
+    let numeric_prefix = !qty.is_empty()
+        && qty.chars().any(|c| c.is_ascii_digit())
+        && qty.chars().all(|c| c.is_ascii_digit() || c == ',');
     if numeric_prefix {
         return true;
     }
@@ -543,6 +597,8 @@ mod tests {
     fn classifies_expected_vs_genuine_unresolved() {
         assert!(is_expected_unresolved("100 Endo"));
         assert!(is_expected_unresolved("15,000 Credits"));
+        assert!(is_expected_unresolved("1000X Ducats"));
+        assert!(is_expected_unresolved("10X Cryotic"));
         assert!(is_expected_unresolved("Forma Blueprint"));
         assert!(is_expected_unresolved("Endo"));
         assert!(!is_expected_unresolved("Akstiletto Prime Barrel"));
@@ -606,6 +662,7 @@ mod tests {
             WfmEntry {
                 url_name: "nikana_prime".into(),
                 en_name: Some("Nikana Prime".into()),
+                ru_name: None,
             },
         );
 
@@ -616,10 +673,12 @@ mod tests {
                 slug: "nikana_prime_set".into(),
                 game_ref: "/Lotus/Weapons/NikanaPrimeSet".into(),
                 en_name: Some("Nikana Prime Set".into()),
+                ru_name: Some("Комплект Никана Прайм".into()),
                 members: vec![WfmMember {
                     slug: "nikana_prime_blade".into(),
                     game_ref: "/Lotus/Weapons/NikanaPrimeBlade".into(),
                     en_name: Some("Nikana Prime Blade".into()),
+                    ru_name: Some("Клинок Никана Прайм".into()),
                 }],
             }],
         };
@@ -719,8 +778,10 @@ mod tests {
         assert_eq!(q.relics_resolved, 1);
         assert_eq!(q.drops_unresolved_expected, 1);
         assert_eq!(q.drops_unresolved_genuine, 1);
+        assert_eq!(q.relics_unresolved_genuine, 0);
+        assert_eq!(q.drops_zero_chance, 0);
         assert_eq!(q.name_coverage["en"].named, 5);
         assert_eq!(q.name_coverage["en"].items_total, 5);
-        assert_eq!(q.name_coverage["ru"].named, 1);
+        assert_eq!(q.name_coverage["ru"].named, 3);
     }
 }

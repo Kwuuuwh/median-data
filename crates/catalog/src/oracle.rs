@@ -55,7 +55,11 @@ fn wfcd_map(value: &serde_json::Value) -> (HashMap<Key, f64>, usize) {
             ) else {
                 continue;
             };
-            let key = (relic_key.clone(), refine.to_string(), normalize_name(item_name));
+            let key = (
+                relic_key.clone(),
+                refine.to_string(),
+                normalize_name(item_name),
+            );
             map.insert(key, chance / 100.0);
         }
     }
