@@ -198,6 +198,7 @@ pub fn assemble_catalog(
 
     let mut relic_rewards: Vec<RelicRewardRow> = Vec::new();
     let mut relic_unresolved = 0usize;
+    let mut reward_name_collisions = 0usize;
     for r in &dt.relics {
         let (Some(relic_uid), Some(reward_uid)) = (
             name_index.resolve(&r.relic_name),
@@ -206,6 +207,9 @@ pub fn assemble_catalog(
             relic_unresolved += 1;
             continue;
         };
+        if name_index.is_colliding(&r.reward_name) || name_index.is_colliding(&r.relic_name) {
+            reward_name_collisions += 1;
+        }
         relic_rewards.push(RelicRewardRow {
             relic_unique_name: relic_uid.to_string(),
             reward_unique_name: reward_uid.to_string(),
@@ -219,9 +223,16 @@ pub fn assemble_catalog(
     let mut place_kinds: HashMap<String, &'static str> = HashMap::new();
     let mut place_labels: HashMap<String, String> = HashMap::new();
     let mut drop_unresolved = 0usize;
+    let mut drops_unresolved_expected = 0usize;
+    let mut drops_unresolved_genuine = 0usize;
     for d in &dt.drops {
         let Some(item_uid) = name_index.resolve(&d.item_name) else {
             drop_unresolved += 1;
+            if is_expected_unresolved(&d.item_name) {
+                drops_unresolved_expected += 1;
+            } else {
+                drops_unresolved_genuine += 1;
+            }
             continue;
         };
         let kind = d.place_kind.as_str();
@@ -260,8 +271,11 @@ pub fn assemble_catalog(
     tracing::info!(
         relics = relic_rewards.len(),
         relic_unresolved,
+        reward_name_collisions,
         drops = item_drops.len(),
         drop_unresolved,
+        drops_unresolved_expected,
+        drops_unresolved_genuine,
         places = drop_places.len(),
         name_collisions = name_index.collisions(),
         "drop tables assembled"
@@ -364,6 +378,28 @@ fn catalog_key(category: &str, unique_name: &str) -> String {
     unique_name.to_string()
 }
 
+/// Whether an unresolved reward/drop name is an expected non-catalog pickup (currency, Forma, endo).
+///
+/// Starting allowlist — extend from the `genuine` list surfaced by the first real builds.
+fn is_expected_unresolved(display_name: &str) -> bool {
+    let trimmed = display_name.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    let first = trimmed.split_whitespace().next().unwrap_or_default();
+    let numeric_prefix = first.chars().any(|c| c.is_ascii_digit())
+        && first.chars().all(|c| c.is_ascii_digit() || c == ',');
+    if numeric_prefix {
+        return true;
+    }
+    let lower = trimmed.to_lowercase();
+    matches!(
+        lower.as_str(),
+        "forma" | "forma blueprint" | "endo" | "kuva" | "credits"
+    ) || lower.ends_with(" endo")
+        || lower.ends_with(" credits")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -375,5 +411,15 @@ mod tests {
             vec!["en", "ru"]
         );
         assert_eq!(normalize_langs(&[]), vec!["en"]);
+    }
+
+    #[test]
+    fn classifies_expected_vs_genuine_unresolved() {
+        assert!(is_expected_unresolved("100 Endo"));
+        assert!(is_expected_unresolved("15,000 Credits"));
+        assert!(is_expected_unresolved("Forma Blueprint"));
+        assert!(is_expected_unresolved("Endo"));
+        assert!(!is_expected_unresolved("Akstiletto Prime Barrel"));
+        assert!(!is_expected_unresolved("Kuva Bramma"));
     }
 }
