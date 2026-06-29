@@ -1,5 +1,5 @@
 /// Catalog schema version. Bumped only on breaking (non-additive) changes.
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 /// Catalog DDL, one statement per entry.
 pub const DDL_STATEMENTS: &[&str] = &[
@@ -54,6 +54,29 @@ pub const DDL_STATEMENTS: &[&str] = &[
        lang      TEXT NOT NULL, \
        name      TEXT NOT NULL, \
        PRIMARY KEY (place_ref, lang)\
+     ) WITHOUT ROWID",
+    "CREATE TABLE weapon (\
+       unique_name       TEXT PRIMARY KEY, \
+       weapon_type       TEXT NOT NULL, \
+       omega_attenuation REAL NOT NULL\
+     ) WITHOUT ROWID",
+    "CREATE TABLE riven_attribute (\
+       tag        TEXT PRIMARY KEY, \
+       prefix_tag TEXT, \
+       suffix_tag TEXT, \
+       unit       TEXT NOT NULL\
+     ) WITHOUT ROWID",
+    "CREATE TABLE riven_attribute_base (\
+       riven_class TEXT NOT NULL, \
+       tag         TEXT NOT NULL, \
+       base_value  REAL NOT NULL, \
+       PRIMARY KEY (riven_class, tag)\
+     ) WITHOUT ROWID",
+    "CREATE TABLE riven_attribute_name (\
+       tag  TEXT NOT NULL, \
+       lang TEXT NOT NULL, \
+       name TEXT NOT NULL, \
+       PRIMARY KEY (tag, lang)\
      ) WITHOUT ROWID",
     "CREATE INDEX idx_item_names_lang_unique ON item_names(lang, unique_name)",
     "CREATE INDEX idx_item_names_lang_name ON item_names(lang, name)",
