@@ -22,9 +22,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
-      - name: Fetch last published index hash
+      - name: Fetch last published index hash and metrics
         run: |
           gh release download --pattern catalog.de_index_hash --dir prev || true
+          gh release download --pattern catalog.sqlite.metrics.json --dir prev || true
           if [ -f prev/catalog.de_index_hash ]; then
             echo "LAST_HASH=$(cat prev/catalog.de_index_hash)" >> "$GITHUB_ENV"
           else
@@ -37,12 +38,32 @@ jobs:
             build --out catalog.sqlite \
             --skip-unchanged --last-hash "$LAST_HASH"
 
+      - name: Validate catalog
+        run: |
+          if [ -f catalog.sqlite ]; then
+            cargo run -p catalog --release -- validate catalog.sqlite
+            if [ -f prev/catalog.sqlite.metrics.json ]; then
+              cargo run -p catalog release -- diff-metrics catalog.sqlite.metrics.json prev/catalog.sqlite.metrics.json
+            else
+              echo "no baseline metrics; skipping diff-metrics"
+            fi
+          else
+            echo "no catalog built (DE index unchanged); skipping validation"
+          fi
+
+      - name: WFCD oracle (diagnostic)
+        continue-on-error: true
+        run: |
+          if [ -f catalog.sqlite ]; then
+            cargo run -p catalog --release -- probe-oracle
+          fi
+
       - name: Publish catalog
         run: |
           if [ -f catalog.sqlite.zst ]; then
             TAG="data-$(date -u +%Y%m%d-%H%M%S)"
             gh release create "$TAG" \
-              catalog.sqlite.zst catalog.de_index_hash \
+              catalog.sqlite.zst catalog.de_index_hash catalog.sqlite.metrics.json \
               --title "$TAG" \
               --notes "Automated catalog build"
           else
