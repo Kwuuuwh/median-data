@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::write::NameRow;
 
@@ -6,6 +6,7 @@ use crate::write::NameRow;
 pub struct NameIndex {
     by_name: HashMap<String, String>,
     collisions: usize,
+    colliding: HashSet<String>,
 }
 
 impl NameIndex {
@@ -13,13 +14,17 @@ impl NameIndex {
     pub fn build(names: &[NameRow]) -> Self {
         let mut by_name: HashMap<String, String> = HashMap::new();
         let mut collisions = 0usize;
+        let mut colliding: HashSet<String> = HashSet::new();
         for row in names.iter().filter(|r| r.lang == "en") {
             let key = normalize(&row.name);
             if key.is_empty() {
                 continue;
             }
             match by_name.get(&key) {
-                Some(existing) if existing != &row.unique_name => collisions += 1,
+                Some(existing) if existing != &row.unique_name => {
+                    collisions += 1;
+                    colliding.insert(key);
+                }
                 Some(_) => {}
                 None => {
                     by_name.insert(key, row.unique_name.clone());
@@ -29,6 +34,7 @@ impl NameIndex {
         Self {
             by_name,
             collisions,
+            colliding,
         }
     }
 
@@ -56,6 +62,22 @@ impl NameIndex {
             }
         }
         None
+    }
+
+    /// Whether a display name maps to a key seen with more that one `uniqueName`.
+    pub fn is_colliding(&self, display_name: &str) -> bool {
+        let norm = normalize(display_name);
+        if self.colliding.contains(&norm) {
+            return true;
+        }
+        for suffix in [" blueprint", " relic", " cache"] {
+            if let Some(stripped) = norm.strip_suffix(suffix) {
+                if self.colliding.contains(stripped) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }
 
@@ -105,5 +127,19 @@ mod tests {
         assert_eq!(idx.collisions(), 1);
         assert_eq!(idx.resolve("Forma Blueprint"), Some("/A"));
         assert_eq!(idx.resolve("Чертёж: Форма"), None);
+    }
+
+    #[test]
+    fn flags_colliding_names_only() {
+        let rows = vec![
+            name("/A", "en", "Forma Blueprint"),
+            name("/B", "en", "Forma Blueprint"),
+            name("/C", "en", "Nikana Prime"),
+        ];
+        let idx = NameIndex::build(&rows);
+        assert!(idx.is_colliding("Forma Blueprint"));
+        assert!(idx.is_colliding("forma  blueprint"));
+        assert!(!idx.is_colliding("Nikana Prime"));
+        assert!(!idx.is_colliding("Unknown Thing"));
     }
 }
