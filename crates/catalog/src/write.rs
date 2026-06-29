@@ -42,6 +42,56 @@ pub struct SetMemberRow {
     pub count: i64,
 }
 
+/// One relic reward row at a given refinement.
+pub struct RelicRewardRow {
+    /// Relic catalog key.
+    pub relic_unique_name: String,
+    /// Rewarded item catalog key.
+    pub reward_unique_name: String,
+    /// Refinement token (`intact`/`exceptional`/`flawless`/`radiant`).
+    pub refinement: String,
+    /// Rarity label as printed by the source.
+    pub rarity: String,
+    /// Drop probability in `[0, 1]`.
+    pub chance: f64,
+}
+
+/// One item-drop row tying an item to a place.
+pub struct ItemDropRow {
+    /// Dropped item catalog key.
+    pub item_unique_name: String,
+    /// Synthetic place reference (`<kind>:<display name>`).
+    pub place_ref: String,
+    /// Rotation letter when the place rotates.
+    pub rotation: Option<String>,
+    /// Stage label when the place is staged.
+    pub stage: Option<String>,
+    /// Rarity label as printed by the source.
+    pub rarity: String,
+    /// Drop probability in `[0, 1]`.
+    pub chance: f64,
+    /// Source section id this row came from.
+    pub source: String,
+}
+
+/// One drop-place row.
+pub struct DropPlaceRow {
+    /// Synthetic place reference.
+    pub place_ref: String,
+    /// Place kind (`node`/`key`/`sortie`/`bounty`/`transient`/`enemy`).
+    pub kind: String,
+}
+
+/// One localized place-name row.
+pub struct PlaceNameRow {
+    /// Synthetic place reference.
+    pub place_ref: String,
+    /// Language tag.
+    pub lang: String,
+    /// Place display name.
+    pub name: String,
+}
+
 /// An assembled catalog ready to be written to SQLite.
 pub struct CatalogData {
     /// Item rows.
@@ -50,6 +100,14 @@ pub struct CatalogData {
     pub names: Vec<NameRow>,
     /// Set-membership rows.
     pub set_members: Vec<SetMemberRow>,
+    /// Relic reward rows (per refinement).
+    pub relic_rewards: Vec<RelicRewardRow>,
+    /// Item-drop rows.
+    pub item_drops: Vec<ItemDropRow>,
+    /// Distinct drop places.
+    pub drop_places: Vec<DropPlaceRow>,
+    /// Localized place names.
+    pub place_names: Vec<PlaceNameRow>,
     /// Identity of the DE index this catalog was built from.
     pub de_index_hash: String,
     /// Languages included (EN always present).
@@ -114,6 +172,55 @@ pub async fn write_catalog(path: &Path, data: &CatalogData) -> anyhow::Result<()
         .bind(m.count)
         .execute(&mut *tx)
         .await?;
+    }
+
+    for r in &data.relic_rewards {
+        sqlx::query(
+            "INSERT OR IGNORE INTO relic_rewards \
+             (relic_unique_name, reward_unique_name, refinement, rarity, chance) \
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(&r.relic_unique_name)
+        .bind(&r.reward_unique_name)
+        .bind(&r.refinement)
+        .bind(&r.rarity)
+        .bind(r.chance)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    for d in &data.item_drops {
+        sqlx::query(
+            "INSERT INTO item_drops \
+             (item_unique_name, place_ref, rotation, stage, rarity, chance, source) \
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&d.item_unique_name)
+        .bind(&d.place_ref)
+        .bind(d.rotation.as_deref())
+        .bind(d.stage.as_deref())
+        .bind(&d.rarity)
+        .bind(d.chance)
+        .bind(&d.source)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    for p in &data.drop_places {
+        sqlx::query("INSERT OR IGNORE INTO drop_places (place_ref, kind) VALUES (?, ?)")
+            .bind(&p.place_ref)
+            .bind(&p.kind)
+            .execute(&mut *tx)
+            .await?;
+    }
+
+    for p in &data.place_names {
+        sqlx::query("INSERT OR IGNORE INTO place_names (place_ref, lang, name) VALUES (?, ?, ?)")
+            .bind(&p.place_ref)
+            .bind(&p.lang)
+            .bind(&p.name)
+            .execute(&mut *tx)
+            .await?;
     }
 
     let meta = [

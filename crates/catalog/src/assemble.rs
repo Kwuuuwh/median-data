@@ -3,8 +3,11 @@ use std::collections::{HashMap, HashSet};
 use wf_fetch::{IndexEntry, ManifestSource, index_hash, items_from_manifest};
 
 use crate::config::Config;
-use crate::write::{CatalogData, CatalogRow, NameRow, SetMemberRow};
-use crate::{category, joins, wfm_bridge};
+use crate::write::{
+    CatalogData, CatalogRow, DropPlaceRow, ItemDropRow, NameRow, PlaceNameRow, RelicRewardRow,
+    SetMemberRow,
+};
+use crate::{category, drop_bridge, joins, wfm_bridge};
 
 /// Fetch DE + WFM data and assemble the in-memory catalog for `langs` (EN is always included first).
 pub fn assemble_catalog(
@@ -125,7 +128,7 @@ pub fn assemble_catalog(
         }
     }
 
-    // Synthetic trade sets + their members (ADR-0056).
+    // Synthetic trade sets + their members.
     let mut set_members: Vec<SetMemberRow> = Vec::new();
     let reverse: HashMap<String, String> = items
         .values()
@@ -187,6 +190,83 @@ pub fn assemble_catalog(
         }
     }
 
+    // Drop / relic source tables: parse the DE drop-table HTML and bridge display names.
+    let name_index = drop_bridge::NameIndex::build(&names);
+    eprintln!("fetching droptables");
+    let html = wf_fetch::fetch_droptables(wfm_agent, &config.endpoints.droptables_url)?;
+    let dt = wf_fetch::parse_droptables(&html)?;
+
+    let mut relic_rewards: Vec<RelicRewardRow> = Vec::new();
+    let mut relic_unresolved = 0usize;
+    for r in &dt.relics {
+        let (Some(relic_uid), Some(reward_uid)) = (
+            name_index.resolve(&r.relic_name),
+            name_index.resolve(&r.reward_name),
+        ) else {
+            relic_unresolved += 1;
+            continue;
+        };
+        relic_rewards.push(RelicRewardRow {
+            relic_unique_name: relic_uid.to_string(),
+            reward_unique_name: reward_uid.to_string(),
+            refinement: r.refinement.as_str().to_string(),
+            rarity: r.rarity.clone(),
+            chance: r.chance,
+        });
+    }
+
+    let mut item_drops: Vec<ItemDropRow> = Vec::new();
+    let mut place_kinds: HashMap<String, &'static str> = HashMap::new();
+    let mut place_labels: HashMap<String, String> = HashMap::new();
+    let mut drop_unresolved = 0usize;
+    for d in &dt.drops {
+        let Some(item_uid) = name_index.resolve(&d.item_name) else {
+            drop_unresolved += 1;
+            continue;
+        };
+        let kind = d.place_kind.as_str();
+        let place_ref = format!("{kind}:{}", d.place_name);
+        place_kinds.entry(place_ref.clone()).or_insert(kind);
+        place_labels
+            .entry(place_ref.clone())
+            .or_insert_with(|| d.place_name.clone());
+        item_drops.push(ItemDropRow {
+            item_unique_name: item_uid.to_string(),
+            place_ref,
+            rotation: d.rotation.clone(),
+            stage: d.stage.clone(),
+            rarity: d.rarity.clone(),
+            chance: d.chance,
+            source: d.source.clone(),
+        });
+    }
+
+    let mut drop_places: Vec<DropPlaceRow> = place_kinds
+        .into_iter()
+        .map(|(place_ref, kind)| DropPlaceRow {
+            place_ref,
+            kind: kind.to_string(),
+        })
+        .collect();
+    let mut place_names: Vec<PlaceNameRow> = place_labels
+        .into_iter()
+        .map(|(place_ref, name)| PlaceNameRow {
+            place_ref,
+            lang: "en".to_string(),
+            name,
+        })
+        .collect();
+
+    tracing::info!(
+        relics = relic_rewards.len(),
+        relic_unresolved,
+        drops = item_drops.len(),
+        drop_unresolved,
+        places = drop_places.len(),
+        name_collisions = name_index.collisions(),
+        "drop tables assembled"
+    );
+
     let mut items: Vec<CatalogRow> = items.into_values().collect();
     items.sort_by(|a, b| a.unique_name.cmp(&b.unique_name));
     names.sort_by(|a, b| {
@@ -199,11 +279,45 @@ pub fn assemble_catalog(
     set_members.dedup_by(|a, b| {
         a.set_unique_name == b.set_unique_name && a.member_unique_name == b.member_unique_name
     });
+    relic_rewards.sort_by(|a, b| {
+        (&a.relic_unique_name, &a.reward_unique_name, &a.refinement).cmp(&(
+            &b.relic_unique_name,
+            &b.reward_unique_name,
+            &b.refinement,
+        ))
+    });
+    item_drops.sort_by(|a, b| {
+        a.item_unique_name
+            .cmp(&b.item_unique_name)
+            .then_with(|| a.place_ref.cmp(&b.place_ref))
+            .then_with(|| a.rotation.cmp(&b.rotation))
+            .then_with(|| a.stage.cmp(&b.stage))
+            .then_with(|| a.source.cmp(&b.source))
+            .then_with(|| a.rarity.cmp(&b.rarity))
+            .then_with(|| a.chance.total_cmp(&b.chance))
+    });
+    // Collapse only byte-identical edges (the source occasionally lists one twice); distinct
+    // place/rotation/chance rows for the same item are kept.
+    item_drops.dedup_by(|a, b| {
+        a.item_unique_name == b.item_unique_name
+            && a.place_ref == b.place_ref
+            && a.rotation == b.rotation
+            && a.stage == b.stage
+            && a.source == b.source
+            && a.rarity == b.rarity
+            && a.chance == b.chance
+    });
+    drop_places.sort_by(|a, b| a.place_ref.cmp(&b.place_ref));
+    place_names.sort_by(|a, b| a.place_ref.cmp(&b.place_ref));
 
     Ok(CatalogData {
         items,
         names,
         set_members,
+        relic_rewards,
+        item_drops,
+        drop_places,
+        place_names,
         de_index_hash,
         langs,
         built_at_ms,

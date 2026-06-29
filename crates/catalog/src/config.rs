@@ -9,12 +9,13 @@ pub struct Config {
     pub build: BuildConfig,
 }
 
-/// Source endpoints (DE Public Export + warframe.market).
+/// Source endpoints (DE Public Export + warframe.market + DE drop tables).
 #[derive(Debug, Deserialize)]
 pub struct Endpoints {
     pub de_index_base: String,
     pub de_manifest_base: String,
     pub wfm_items_url: String,
+    pub droptables_url: String,
 }
 
 /// Category-derivation rules keyed by source manifest, with a global fallback.
@@ -75,6 +76,7 @@ impl Config {
                 &self.endpoints.de_manifest_base,
             ),
             ("endpoints.wfm_items_url", &self.endpoints.wfm_items_url),
+            ("endpoints.droptables_url", &self.endpoints.droptables_url),
         ] {
             if !value.starts_with("https://") {
                 anyhow::bail!("config: {field} must be an https:// URL, got {value:?}");
@@ -128,6 +130,7 @@ mod tests {
                 de_index_base: "https://x/index_".into(),
                 de_manifest_base: "https://x/Manifest/".into(),
                 wfm_items_url: "https://x/items".into(),
+                droptables_url: "https://x/droptables".into(),
             },
             categories: Categories {
                 default: "other".into(),
@@ -149,6 +152,13 @@ mod tests {
     fn rejects_non_https_endpoint() {
         let mut c = valid();
         c.endpoints.de_index_base = "http://x/index_".into();
+        assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_non_https_droptables() {
+        let mut c = valid();
+        c.endpoints.droptables_url = "http://x/droptables".into();
         assert!(c.validate().is_err());
     }
 

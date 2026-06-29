@@ -12,6 +12,7 @@ mod assemble;
 mod category;
 mod compress;
 mod config;
+mod drop_bridge;
 mod joins;
 mod schema;
 mod wfm_bridge;
@@ -40,9 +41,10 @@ fn run(args: &[String]) -> anyhow::Result<()> {
         Some("probe-items") => probe_items(),
         Some("probe-joins") => probe_joins(),
         Some("probe-wfm") => probe_wfm(),
+        Some("probe-drops") => probe_drops(),
         Some("build") => build(&args[1..]),
         _ => anyhow::bail!(
-            "usage: catalog (probe-index | probe-items | probe-joins | probe-wfm | build [--out PATH] [--langs en,ru] [--skip-unchanged] [--last-hash H])"
+            "usage: catalog (probe-index | probe-items | probe-joins | probe-wfm | probe-drops | build [--out PATH] [--langs en,ru] [--skip-unchanged] [--last-hash H])"
         ),
     }
 }
@@ -247,6 +249,82 @@ fn probe_wfm() -> anyhow::Result<()> {
         for m in &set.members {
             println!("  {} | {}", m.slug, m.game_ref);
         }
+    }
+    Ok(())
+}
+
+/// Fetch + parse the drop tables, build a light EN name index, and report resolve stats.
+fn probe_drops() -> anyhow::Result<()> {
+    use std::collections::BTreeSet;
+
+    let config = Config::load(&config_dir())?;
+    let source = de_source(&config);
+    let agent = http_agent();
+
+    let html = wf_fetch::fetch_droptables(&agent, &config.endpoints.droptables_url)?;
+    let dt = wf_fetch::parse_droptables(&html)?;
+    println!(
+        "parsed {} relic rewards, {} item drops",
+        dt.relics.len(),
+        dt.drops.len()
+    );
+
+    // Light EN name index from item manifests (no WFM/sets — the full build resolves more).
+    let index = source.fetch_index("en")?;
+    let mut names: Vec<write::NameRow> = Vec::new();
+    for mname in &config.build.item_manifests {
+        let Some(entry) = index.iter().find(|e| e.manifest == mname.as_str()) else {
+            continue;
+        };
+        let value = source.fetch_manifest(entry)?;
+        for raw in items_from_manifest(&value) {
+            names.push(write::NameRow {
+                unique_name: raw.unique_name,
+                lang: "en".to_string(),
+                source: "DE",
+                name: raw.name,
+            });
+        }
+    }
+    let idx = drop_bridge::NameIndex::build(&names);
+    println!(
+        "en name index: {} names, {} collisions",
+        idx.name_count(),
+        idx.collisions()
+    );
+
+    let mut unresolved: BTreeSet<String> = BTreeSet::new();
+    let mut relic_ok = 0usize;
+    for r in &dt.relics {
+        let relic = idx.resolve(&r.relic_name);
+        let reward = idx.resolve(&r.reward_name);
+        if relic.is_some() && reward.is_some() {
+            relic_ok += 1;
+        }
+        if relic.is_none() {
+            unresolved.insert(r.relic_name.clone());
+        }
+        if reward.is_none() {
+            unresolved.insert(r.reward_name.clone());
+        }
+    }
+    let mut drop_ok = 0usize;
+    for d in &dt.drops {
+        if idx.resolve(&d.item_name).is_some() {
+            drop_ok += 1;
+        } else {
+            unresolved.insert(d.item_name.clone());
+        }
+    }
+
+    println!(
+        "relic rewards resolved (both ends): {relic_ok}/{}",
+        dt.relics.len()
+    );
+    println!("item drops resolved: {drop_ok}/{}", dt.drops.len());
+    println!("distinct unresolved names: {}", unresolved.len());
+    for n in unresolved.iter().take(40) {
+        println!("  unresolved: {n}");
     }
     Ok(())
 }

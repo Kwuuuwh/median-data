@@ -1,3 +1,4 @@
 de_index_base = "https://content.warframe.com/PublicExport/index_"
 de_manifest_base = "https://content.warframe.com/PublicExport/Manifest/"
 wfm_items_url = "https://api.warframe.market/v2/items"
+droptables_url = "https://www.warframe.com/droptables"
