@@ -93,6 +93,48 @@ pub struct PlaceNameRow {
     pub name: String,
 }
 
+/// One weapon row: the disposition satellite.
+pub struct WeaponRow {
+    /// DE stable key (primary key).
+    pub unique_name: String,
+    /// DE `productCategory` (e.q. `LongGuns`).
+    pub weapon_type: String,
+    /// Riven disposition.
+    pub omega_attenuation: f64,
+}
+
+/// One riven attribute row: per-tag display/grammar metadata.
+pub struct RivenAttributeRow {
+    /// DE stat tag (primary key).
+    pub tag: String,
+    /// Riven-name prefix syllable, if any.
+    pub prefix_tag: Option<String>,
+    /// Riven-name suffix syllable, if any.
+    pub suffix_tag: Option<String>,
+    /// Display unit (`percent`/`flat`).
+    pub unit: String,
+}
+
+/// One riven attribute base value for a given riven class.
+pub struct RivenAttributeBaseRow {
+    /// Riven class token (`rifle`, `shotgun`, ...).
+    pub riven_class: String,
+    /// DE stat tag.
+    pub tag: String,
+    /// Base value at the riven template's reference.
+    pub base_value: f64,
+}
+
+/// One localized riven attribute name.
+pub struct RivenAttributeNameRow {
+    /// DE stat tag.
+    pub tag: String,
+    /// Language tag (`en`/`ru`).
+    pub lang: String,
+    /// Localized stat name.
+    pub name: String,
+}
+
 /// An assembled catalog ready to be written to SQLite.
 pub struct CatalogData {
     /// Item rows.
@@ -109,6 +151,14 @@ pub struct CatalogData {
     pub drop_places: Vec<DropPlaceRow>,
     /// Localized place names.
     pub place_names: Vec<PlaceNameRow>,
+    /// Weapon disposition rows.
+    pub weapons: Vec<WeaponRow>,
+    /// Riven attribute metadata rows.
+    pub riven_attributes: Vec<RivenAttributeRow>,
+    /// Riven attribute base values per class.
+    pub riven_attribute_bases: Vec<RivenAttributeBaseRow>,
+    /// Localized riven attribute names.
+    pub riven_attribute_names: Vec<RivenAttributeNameRow>,
     /// Identity of the DE index this catalog was built from.
     pub de_index_hash: String,
     /// Languages included (EN always present).
@@ -224,6 +274,54 @@ pub async fn write_catalog(path: &Path, data: &CatalogData) -> anyhow::Result<()
             .bind(&p.name)
             .execute(&mut *tx)
             .await?;
+    }
+
+    for w in &data.weapons {
+        sqlx::query(
+            "INSERT OR IGNORE INTO weapon (unique_name, weapon_type, omega_attenuation) \
+             VALUES (?, ?, ?)",
+        )
+        .bind(&w.unique_name)
+        .bind(&w.weapon_type)
+        .bind(w.omega_attenuation)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    for a in &data.riven_attributes {
+        sqlx::query(
+            "INSERT OR IGNORE INTO riven_attribute (tag, prefix_tag, suffix_tag, unit) \
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind(&a.tag)
+        .bind(a.prefix_tag.as_deref())
+        .bind(a.suffix_tag.as_deref())
+        .bind(&a.unit)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    for b in &data.riven_attribute_bases {
+        sqlx::query(
+            "INSERT OR IGNORE INTO riven_attribute_base (riven_class, tag, base_value) \
+             VALUES (?, ?, ?)",
+        )
+        .bind(&b.riven_class)
+        .bind(&b.tag)
+        .bind(b.base_value)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    for n in &data.riven_attribute_names {
+        sqlx::query(
+            "INSERT OR IGNORE INTO riven_attribute_name (tag, lang, name) VALUES (?, ?, ?)",
+        )
+        .bind(&n.tag)
+        .bind(&n.lang)
+        .bind(&n.name)
+        .execute(&mut *tx)
+        .await?;
     }
 
     let meta = [
