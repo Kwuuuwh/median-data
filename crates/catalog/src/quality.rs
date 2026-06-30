@@ -11,6 +11,10 @@ pub struct TableCounts {
     pub item_drops: u64,
     pub drop_places: u64,
     pub place_names: u64,
+    pub weapon: u64,
+    pub riven_attribute: u64,
+    pub riven_attribute_base: u64,
+    pub riven_attribute_name: u64,
 }
 
 /// Per-language name coverage: how many catalog items carry a name in that language.
@@ -184,6 +188,10 @@ mod tests {
                 item_drops: 3,
                 drop_places: 2,
                 place_names: 2,
+                weapon: 2,
+                riven_attribute: 2,
+                riven_attribute_base: 4,
+                riven_attribute_name: 3,
             },
             relics_total: 5,
             relics_resolved: 5,

@@ -520,6 +520,10 @@ pub fn assemble_from_parts(
         item_drops: item_drops.len() as u64,
         drop_places: drop_places.len() as u64,
         place_names: place_names.len() as u64,
+        weapon: weapons.len() as u64,
+        riven_attribute: riven_attributes.len() as u64,
+        riven_attribute_base: riven_attribute_bases.len() as u64,
+        riven_attribute_name: riven_attribute_names.len() as u64,
     };
 
     let item_keys: HashSet<&str> = items.iter().map(|i| i.unique_name.as_str()).collect();

@@ -11,6 +11,9 @@ pub struct Thresholds {
     pub min_item_drops: i64,
     pub min_drop_places: i64,
     pub min_place_names: i64,
+    pub min_weapon: i64,
+    pub min_riven_attribute: i64,
+    pub min_riven_attribute_base: i64,
     pub ru_name_gap_budget: i64,
     pub relic_resolve_min: f64,
     pub overshoot_max: f64,
@@ -27,6 +30,9 @@ impl Default for Thresholds {
             min_item_drops: 200,
             min_drop_places: 20,
             min_place_names: 20,
+            min_weapon: 900,
+            min_riven_attribute: 30,
+            min_riven_attribute_base: 150,
             ru_name_gap_budget: 600,
             relic_resolve_min: 0.98,
             overshoot_max: 1.02,
@@ -107,6 +113,9 @@ async fn check(pool: &SqlitePool, t: &Thresholds) -> anyhow::Result<Report> {
         ("item_drops", t.min_item_drops),
         ("drop_places", t.min_drop_places),
         ("place_names", t.min_place_names),
+        ("weapon", t.min_weapon),
+        ("riven_attribute", t.min_riven_attribute),
+        ("riven_attribute_base", t.min_riven_attribute_base),
     ] {
         let n = count(pool, &format!("SELECT count(*) FROM {table}")).await?;
         if n < floor {
@@ -222,6 +231,53 @@ async fn check(pool: &SqlitePool, t: &Thresholds) -> anyhow::Result<Report> {
         }
     }
 
+    let disposition_bad = count(
+        pool,
+        "SELECT count(*) FROM weapon \
+         WHERE NOT (omega_attenuation >= 0.5 AND omega_attenuation <= 1.55)",
+    )
+    .await?;
+    if disposition_bad > 0 {
+        report.fail(format!(
+            "weapon disposition out of [0.5, 1.55]: {disposition_bad} row(s)"
+        ));
+    }
+
+    let base_zero = count(
+        pool,
+        "SELECT count(*) FROM riven_attribute_base WHERE base_value = 0",
+    )
+    .await?;
+    if base_zero > 0 {
+        report.fail(format!(
+            "riven_attribute_base with zero base_value: {base_zero} row(s)"
+        ));
+    }
+
+    let base_uncovered = count(
+        pool,
+        "SELECT count(*) FROM riven_attribute_base b \
+         LEFT JOIN riven_attribute a ON b.tag = a.tag WHERE a.tag IS NULL",
+    )
+    .await?;
+    if base_uncovered > 0 {
+        report.fail(format!(
+            "riven_attribute_base tags without metadata: {base_uncovered} row(s)"
+        ));
+    }
+
+    let name_uncovered = count(
+        pool,
+        "SELECT count(*) FROM riven_attribute_name n \
+         LEFT JOIN riven_attribute a ON n.tag = a.tag WHERE a.tag IS NULL",
+    )
+    .await?;
+    if name_uncovered > 0 {
+        report.fail(format!(
+            "riven_attribute_name tags without metadata: {name_uncovered} row(s)"
+        ));
+    }
+
     match meta_value(pool, "quality").await? {
         None => report.fail("meta['quality'] is missing"),
         Some(raw) => {
@@ -317,6 +373,9 @@ mod tests {
             min_item_drops: 1,
             min_drop_places: 1,
             min_place_names: 1,
+            min_weapon: 1,
+            min_riven_attribute: 1,
+            min_riven_attribute_base: 1,
             ru_name_gap_budget: 0,
             relic_resolve_min: 0.98,
             overshoot_max: 1.02,
@@ -344,6 +403,10 @@ mod tests {
                 item_drops: 1,
                 drop_places: 1,
                 place_names: 1,
+                weapon: 1,
+                riven_attribute: 1,
+                riven_attribute_base: 1,
+                riven_attribute_name: 1,
             },
             relics_total: 1,
             relics_resolved: 1,
@@ -415,6 +478,34 @@ mod tests {
             "INSERT INTO item_drops \
              (item_unique_name, place_ref, rotation, stage, rarity, chance, source) \
              VALUES ('/Item/Seer', 'node:Mercury/Tolstoj', NULL, NULL, 'Common', 0.38, 'missionRewards')",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO weapon (unique_name, weapon_type, omega_attenuation) \
+             VALUES ('/Item/Seer', 'Pistols', 1.0)",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO riven_attribute (tag, prefix_tag, suffix_tag, unit) \
+             VALUES ('WeaponCritChanceMod', 'crita', 'cron', 'percent')",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO riven_attribute_base (riven_class, tag, base_value) \
+             VALUES ('pistol', 'WeaponCritChanceMod', 0.0233)",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO riven_attribute_name (tag, lang, name) \
+             VALUES ('WeaponCritChanceMod', 'en', 'Critical Chance')",
         )
         .execute(pool)
         .await
@@ -502,5 +593,42 @@ mod tests {
         let report = check(&pool, &test_thresholds()).await.unwrap();
         assert!(!report.passed());
         assert!(report.failures.iter().any(|f| f.contains("relic_rewards")));
+    }
+
+    #[tokio::test]
+    async fn disposition_out_of_range_fails() {
+        let pool = mem_pool().await;
+        insert_healthy(&pool).await;
+        sqlx::query(
+            "INSERT INTO weapon (unique_name, weapon_type, omega_attenuation) \
+             VALUES ('/W/Bad', 'LongGuns', 2.0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let report = check(&pool, &test_thresholds()).await.unwrap();
+        assert!(!report.passed());
+        assert!(report.failures.iter().any(|f| f.contains("disposition")));
+    }
+
+    #[tokio::test]
+    async fn uncovered_riven_base_tag_fails() {
+        let pool = mem_pool().await;
+        insert_healthy(&pool).await;
+        sqlx::query(
+            "INSERT INTO riven_attribute_base (riven_class, tag, base_value) \
+             VALUES ('rifle', 'WeaponUnknownMod', 0.01)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let report = check(&pool, &test_thresholds()).await.unwrap();
+        assert!(!report.passed());
+        assert!(
+            report
+                .failures
+                .iter()
+                .any(|f| f.contains("without metadata"))
+        );
     }
 }
