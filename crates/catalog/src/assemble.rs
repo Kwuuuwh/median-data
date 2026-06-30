@@ -1,11 +1,14 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use wf_fetch::{DropTables, IndexEntry, ManifestSource, RawItem, index_hash, items_from_manifest};
+use wf_fetch::{
+    DropTables, IndexEntry, ManifestSource, RawItem, RawRivenBase, RawWeapon, index_hash,
+    items_from_manifest, riven_bases_from_manifest, weapons_from_manifest,
+};
 
 use crate::config::Config;
 use crate::write::{
     CatalogData, CatalogRow, DropPlaceRow, ItemDropRow, NameRow, PlaceNameRow, RelicRewardRow,
-    SetMemberRow,
+    RivenAttributeBaseRow, RivenAttributeNameRow, RivenAttributeRow, SetMemberRow, WeaponRow,
 };
 use crate::{category, drop_bridge, joins, quality, wfm_bridge};
 
@@ -31,6 +34,10 @@ pub struct AssembleInputs {
     pub bridge: wfm_bridge::WfmBridge,
     /// Parsed DE drop tables.
     pub drop_tables: DropTables,
+    /// Weapons with disposition (from `ExportWeapons`).
+    pub weapons: Vec<RawWeapon>,
+    /// Riven attribute base values per class (from `ExportUpgrades` templates).
+    pub riven_bases: Vec<RawRivenBase>,
 }
 
 /// Fetch DE + WFM data and assemble the in-memory catalog for `langs` (EN is always included first).
@@ -47,12 +54,19 @@ pub fn assemble_catalog(
     let de_index_hash = crate::schema::catalog_version(&index_hash(&en_index));
 
     let mut en_items = Vec::new();
+    let mut weapons = Vec::new();
+    let mut riven_bases = Vec::new();
     for mname in &config.build.item_manifests {
         let Some(entry) = en_index.iter().find(|e| e.manifest == mname.as_str()) else {
             continue;
         };
         eprintln!("fetching {mname} (en)");
         let value = source.fetch_manifest(entry)?;
+        if mname.as_str() == "ExportWeapons" {
+            weapons = weapons_from_manifest(&value);
+        } else if mname.as_str() == "ExportUpgrades" {
+            riven_bases = riven_bases_from_manifest(&value);
+        }
         en_items.push(ManifestItems {
             manifest: mname.clone(),
             items: items_from_manifest(&value),
@@ -98,6 +112,8 @@ pub fn assemble_catalog(
         manifest,
         bridge,
         drop_tables,
+        weapons,
+        riven_bases,
     };
     Ok(assemble_from_parts(&inputs, config, &langs, built_at_ms))
 }
@@ -447,6 +463,56 @@ pub fn assemble_from_parts(
     drop_places.sort_by(|a, b| a.place_ref.cmp(&b.place_ref));
     place_names.sort_by(|a, b| a.place_ref.cmp(&b.place_ref));
 
+    let mut weapons: Vec<WeaponRow> = inputs
+        .weapons
+        .iter()
+        .map(|w| WeaponRow {
+            unique_name: w.unique_name.clone(),
+            weapon_type: w.weapon_type.clone(),
+            omega_attenuation: w.omega_attenuation,
+        })
+        .collect();
+    weapons.sort_by(|a, b| a.unique_name.cmp(&b.unique_name));
+    weapons.dedup_by(|a, b| a.unique_name == b.unique_name);
+
+    let mut riven_attribute_bases: Vec<RivenAttributeBaseRow> = inputs
+        .riven_bases
+        .iter()
+        .map(|b| RivenAttributeBaseRow {
+            riven_class: b.riven_class.clone(),
+            tag: b.tag.clone(),
+            base_value: b.base_value,
+        })
+        .collect();
+    riven_attribute_bases.sort_by(|a, b| (&a.riven_class, &a.tag).cmp(&(&b.riven_class, &b.tag)));
+    riven_attribute_bases.dedup_by(|a, b| a.riven_class == b.riven_class && a.tag == b.tag);
+
+    let mut riven_attributes: Vec<RivenAttributeRow> = Vec::new();
+    let mut riven_attribute_names: Vec<RivenAttributeNameRow> = Vec::new();
+    for a in &config.riven_attributes.attributes {
+        riven_attributes.push(RivenAttributeRow {
+            tag: a.tag.clone(),
+            prefix_tag: non_empty(&a.prefix_tag),
+            suffix_tag: non_empty(&a.suffix_tag),
+            unit: a.unit.clone(),
+        });
+        riven_attribute_names.push(RivenAttributeNameRow {
+            tag: a.tag.clone(),
+            lang: "en".to_string(),
+            name: a.name_en.clone(),
+        });
+        if want_ru && !a.name_ru.trim().is_empty() {
+            riven_attribute_names.push(RivenAttributeNameRow {
+                tag: a.tag.clone(),
+                lang: "ru".to_string(),
+                name: a.name_ru.clone(),
+            });
+        }
+    }
+    riven_attributes.sort_by(|a, b| a.tag.cmp(&b.tag));
+    riven_attributes.dedup_by(|a, b| a.tag == b.tag);
+    riven_attribute_names.sort_by(|a, b| (&a.tag, &a.lang).cmp(&(&b.tag, &b.lang)));
+
     let tables = quality::TableCounts {
         items: items.len() as u64,
         item_names: names.len() as u64,
@@ -506,10 +572,10 @@ pub fn assemble_from_parts(
         item_drops,
         drop_places,
         place_names,
-        weapons: Vec::new(),
-        riven_attributes: Vec::new(),
-        riven_attribute_bases: Vec::new(),
-        riven_attribute_names: Vec::new(),
+        weapons,
+        riven_attributes,
+        riven_attribute_bases,
+        riven_attribute_names,
         de_index_hash,
         langs,
         built_at_ms,
@@ -557,6 +623,15 @@ fn catalog_key(category: &str, unique_name: &str) -> String {
     unique_name.to_string()
 }
 
+/// Map an empty/whitespace string to `None`, otherwise `Some`.
+fn non_empty(s: &str) -> Option<String> {
+    if s.trim().is_empty() {
+        None
+    } else {
+        Some(s.to_string())
+    }
+}
+
 /// Whether an unresolved reward/drop name is an expected non-catalog pickup (currency, Forma, endo).
 ///
 /// Starting allowlist — extend from the `genuine` list surfaced by the first real builds.
@@ -584,7 +659,7 @@ fn is_expected_unresolved(display_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{BuildConfig, Categories, Endpoints, RivenAttributes};
+    use crate::config::{BuildConfig, Categories, Endpoints, RivenAttributeRule, RivenAttributes};
     use crate::wfm_bridge::{WfmBridge, WfmEntry, WfmMember, WfmSet};
     use wf_fetch::{ItemDrop, PlaceKind, Refinement, RelicReward};
 
@@ -626,7 +701,26 @@ mod tests {
                 langs: vec!["en".into(), "ru".into()],
                 item_manifests: vec!["ExportWeapons".into()],
             },
-            riven_attributes: RivenAttributes { attributes: vec![] },
+            riven_attributes: RivenAttributes {
+                attributes: vec![
+                    RivenAttributeRule {
+                        tag: "WeaponMeleeDamageMod".into(),
+                        prefix_tag: "visi".into(),
+                        suffix_tag: "ata".into(),
+                        unit: "percent".into(),
+                        name_en: "Melee Damage".into(),
+                        name_ru: "Урон в ближнем бою".into(),
+                    },
+                    RivenAttributeRule {
+                        tag: "WeaponCritChanceMod".into(),
+                        prefix_tag: "crita".into(),
+                        suffix_tag: "cron".into(),
+                        unit: "percent".into(),
+                        name_en: "Critical Chance".into(),
+                        name_ru: String::new(),
+                    },
+                ],
+            },
         }
     }
 
@@ -739,6 +833,23 @@ mod tests {
             manifest: serde_json::json!({}),
             bridge,
             drop_tables,
+            weapons: vec![RawWeapon {
+                unique_name: "/Lotus/Weapons/NikanaPrime".into(),
+                weapon_type: "Melee".into(),
+                omega_attenuation: 1.35,
+            }],
+            riven_bases: vec![
+                RawRivenBase {
+                    riven_class: "melee".into(),
+                    tag: "WeaponMeleeDamageMod".into(),
+                    base_value: 1.65,
+                },
+                RawRivenBase {
+                    riven_class: "melee".into(),
+                    tag: "WeaponCritChanceMod".into(),
+                    base_value: 2.7,
+                },
+            ],
         }
     }
 
@@ -788,5 +899,32 @@ mod tests {
         assert_eq!(q.name_coverage["en"].named, 5);
         assert_eq!(q.name_coverage["en"].items_total, 5);
         assert_eq!(q.name_coverage["ru"].named, 3);
+        assert_eq!(data.weapons.len(), 1);
+        assert_eq!(data.weapons[0].unique_name, "/Lotus/Weapons/NikanaPrime");
+        assert_eq!(data.weapons[0].weapon_type, "Melee");
+
+        // sorted by (riven_class, tag): WeaponCritChanceMod precedes WeaponMeleeDamageMod
+        assert_eq!(data.riven_attribute_bases.len(), 2);
+        assert_eq!(data.riven_attribute_bases[0].tag, "WeaponCritChanceMod");
+        assert_eq!(data.riven_attribute_bases[0].riven_class, "melee");
+
+        assert_eq!(data.riven_attributes.len(), 2);
+        let crit = data
+            .riven_attributes
+            .iter()
+            .find(|a| a.tag == "WeaponCritChanceMod")
+            .unwrap();
+        assert_eq!(crit.prefix_tag.as_deref(), Some("crita"));
+        assert_eq!(crit.unit, "percent");
+
+        // en for both tags + ru only where name_ru is set (1 of 2) => 3
+        assert_eq!(data.riven_attribute_names.len(), 3);
+        let ru: Vec<_> = data
+            .riven_attribute_names
+            .iter()
+            .filter(|n| n.lang == "ru")
+            .collect();
+        assert_eq!(ru.len(), 1);
+        assert_eq!(ru[0].tag, "WeaponMeleeDamageMod");
     }
 }
