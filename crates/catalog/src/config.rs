@@ -7,6 +7,7 @@ pub struct Config {
     pub endpoints: Endpoints,
     pub categories: Categories,
     pub build: BuildConfig,
+    pub riven_attributes: RivenAttributes,
 }
 
 /// Source endpoints (DE Public Export + warframe.market + DE drop tables).
@@ -53,16 +54,45 @@ pub struct BuildConfig {
     pub item_manifests: Vec<String>,
 }
 
+/// Curated riven attribute metadata (syllables, unit, names); base values come from DE.
+#[derive(Debug, Deserialize)]
+pub struct RivenAttributes {
+    #[serde(default, rename = "attribute")]
+    pub attributes: Vec<RivenAttributeRule>,
+}
+
+/// One curated riven attribute: its DE tag plus display/grammar metadata.
+#[derive(Debug, Deserialize)]
+pub struct RivenAttributeRule {
+    /// DE stat tag (e.g. `WeaponCritChanceMod`).
+    pub tag: String,
+    /// Riven-name prefix syllable (may be empty).
+    #[serde(default)]
+    pub prefix_tag: String,
+    /// Riven-name suffix syllable (may be empty).
+    #[serde(default)]
+    pub suffix_tag: String,
+    /// Display unit: `percent` or `flat`.
+    pub unit: String,
+    /// English stat name.
+    pub name_en: String,
+    /// Russian stat name (curated; may be empty until filled).
+    #[serde(default)]
+    pub name_ru: String,
+}
+
 impl Config {
     /// Load and validate all config files from `dir`, failing before any network use.
     pub fn load(dir: &Path) -> anyhow::Result<Self> {
         let endpoints: Endpoints = read_toml(&dir.join("endpoints.toml"))?;
         let categories: Categories = read_toml(&dir.join("categories.toml"))?;
         let build: BuildConfig = read_toml(&dir.join("build.toml"))?;
+        let riven_attributes: RivenAttributes = read_toml(&dir.join("riven_attributes.toml"))?;
         let config = Config {
             endpoints,
             categories,
             build,
+            riven_attributes,
         };
         config.validate()?;
         Ok(config)
@@ -111,6 +141,28 @@ impl Config {
         if self.build.item_manifests.is_empty() {
             anyhow::bail!("config: build.item_manifests must be non-empty");
         }
+        if self.riven_attributes.attributes.is_empty() {
+            anyhow::bail!("config: riven_attributes must be non-empty");
+        }
+        let mut seen_tags = std::collections::HashSet::new();
+        for a in &self.riven_attributes.attributes {
+            if a.tag.trim().is_empty() {
+                anyhow::bail!("config: a riven_attribute has an empty tag");
+            }
+            if !seen_tags.insert(a.tag.as_str()) {
+                anyhow::bail!("config: duplicate riven_attribute tag {:?}", a.tag);
+            }
+            if a.unit != "percent" && a.unit != "flat" {
+                anyhow::bail!(
+                    "config: riven_attribute {:?} unit must be 'percent' or 'flat', got {:?}",
+                    a.tag,
+                    a.unit
+                );
+            }
+            if a.name_en.trim().is_empty() {
+                anyhow::bail!("config: riven_attribute {:?} must have a name_en", a.tag);
+            }
+        }
         Ok(())
     }
 }
@@ -143,6 +195,16 @@ mod tests {
                 langs: vec!["en".into()],
                 item_manifests: vec!["ExportWeapons".into()],
             },
+            riven_attributes: RivenAttributes {
+                attributes: vec![RivenAttributeRule {
+                    tag: "WeaponCritChanceMod".into(),
+                    prefix_tag: "crita".into(),
+                    suffix_tag: "cron".into(),
+                    unit: "percent".into(),
+                    name_en: "Critical Chance".into(),
+                    name_ru: String::new(),
+                }],
+            },
         }
     }
 
@@ -169,6 +231,20 @@ mod tests {
     fn rejects_empty_item_manifests() {
         let mut c = valid();
         c.build.item_manifests.clear();
+        assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_bad_riven_unit() {
+        let mut c = valid();
+        c.riven_attributes.attributes[0].unit = "ratio".into();
+        assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_empty_riven_attributes() {
+        let mut c = valid();
+        c.riven_attributes.attributes.clear();
         assert!(c.validate().is_err());
     }
 }

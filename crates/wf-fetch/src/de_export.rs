@@ -120,6 +120,137 @@ pub fn items_from_manifest(value: &serde_json::Value) -> Vec<RawItem> {
     out
 }
 
+/// A weapon's riven-relevant fields: stable key, product category, and disposition.
+#[derive(Debug, Clone)]
+pub struct RawWeapon {
+    /// DE stable key.
+    pub unique_name: String,
+    /// DE `productCategory` (e.q. `LongGuns`, `Pistols`, `Melee`).
+    pub weapon_type: String,
+    /// Riven disposition (`omegaAttenuation`).
+    pub omega_attenuation: f64,
+}
+
+/// One riven attribute's base value for a given riven class, from a DE riven template.
+#[derive(Debug, Clone)]
+pub struct RawRivenBase {
+    /// Canonical riven class token (`rifle`, `shotgun`, ...).
+    pub riven_class: String,
+    /// DE stat tag (e.q. `WeaponCritChanceMod`).
+    pub tag: String,
+    /// Base value at the template's reference.
+    pub base_value: f64,
+}
+
+/// DE riven-template uniqueNames that carry a class's full attribute pool, by class token.
+const RIVEN_CLASS_TEMPLATES: [(&str, &str); 7] = [
+    (
+        "/Lotus/Upgrades/Mods/Randomized/LotusRifleRandomModRare",
+        "rifle",
+    ),
+    (
+        "/Lotus/Upgrades/Mods/Randomized/LotusShotgunRandomModRare",
+        "shotgun",
+    ),
+    (
+        "/Lotus/Upgrades/Mods/Randomized/LotusPistolRandomModRare",
+        "pistol",
+    ),
+    (
+        "/Lotus/Upgrades/Mods/Randomized/PlayerMeleeWeaponRandomModRare",
+        "melee",
+    ),
+    (
+        "/Lotus/Upgrades/Mods/Randomized/LotusArchgunRandomModRare",
+        "archgun",
+    ),
+    (
+        "/Lotus/Upgrades/Mods/Randomized/LotusModularPistolRandomModRare",
+        "kitgun",
+    ),
+    (
+        "/Lotus/Upgrades/Mods/Randomized/LotusModularMeleeRandomModRare",
+        "zaw",
+    ),
+];
+
+/// Extract every weapon carrying both a `productCategory` and an `omegaAttenuation`.
+pub fn weapons_from_manifest(value: &serde_json::Value) -> Vec<RawWeapon> {
+    let mut out = Vec::new();
+    let Some(obj) = value.as_object() else {
+        return out;
+    };
+    for v in obj.values() {
+        let Some(arr) = v.as_array() else {
+            continue;
+        };
+        for el in arr {
+            let (Some(unique_name), Some(weapon_type), Some(omega)) = (
+                el.get("uniqueName").and_then(|x| x.as_str()),
+                el.get("productCategory").and_then(|x| x.as_str()),
+                el.get("omegaAttenuation").and_then(|x| x.as_f64()),
+            ) else {
+                continue;
+            };
+            if unique_name.is_empty() || weapon_type.is_empty() {
+                continue;
+            }
+            out.push(RawWeapon {
+                unique_name: unique_name.to_string(),
+                weapon_type: weapon_type.to_string(),
+                omega_attenuation: omega,
+            });
+        }
+    }
+    out
+}
+
+/// Extract per-class riven attribute base values from `ExportUpgrades` riven templates.
+pub fn riven_bases_from_manifest(value: &serde_json::Value) -> Vec<RawRivenBase> {
+    let mut out = Vec::new();
+    let Some(obj) = value.as_object() else {
+        return out;
+    };
+    let class_of: std::collections::HashMap<&str, &str> =
+        RIVEN_CLASS_TEMPLATES.iter().copied().collect();
+    for v in obj.values() {
+        let Some(arr) = v.as_array() else {
+            continue;
+        };
+        for el in arr {
+            let Some(unique_name) = el.get("uniqueName").and_then(|x| x.as_str()) else {
+                continue;
+            };
+            let Some(&riven_class) = class_of.get(unique_name) else {
+                continue;
+            };
+            let Some(entries) = el.get("upgradeEntries").and_then(|x| x.as_array()) else {
+                continue;
+            };
+            for entry in entries {
+                let Some(tag) = entry.get("tag").and_then(|x| x.as_str()) else {
+                    continue;
+                };
+                let Some(base_value) = entry
+                    .get("upgradeValues")
+                    .and_then(|x| x.as_array())
+                    .and_then(|vals| vals.first())
+                    .and_then(|first| first.get("value"))
+                    .and_then(|x| x.as_f64())
+                else {
+                    continue;
+                };
+                out.push(RawRivenBase {
+                    riven_class: riven_class.to_string(),
+                    tag: tag.to_string(),
+                    base_value,
+                });
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,5 +310,47 @@ mod tests {
                 .any(|i| i.unique_name == "/W/A" && i.name == "Braton")
         );
         assert!(items.iter().all(|i| i.unique_name != "/R/1"));
+    }
+
+    #[test]
+    fn extracts_weapons_with_disposition() {
+        let value = serde_json::json!({
+            "ExportWeapons": [
+                { "uniqueName": "/W/Braton", "name": "Braton",
+                  "productCategory": "LongGuns", "omegaAttenuation": 1.0 },
+                { "uniqueName": "/W/NoOmega", "name": "X", "productCategory": "LongGuns" }
+            ],
+            "ExportRailjackWeapons": [
+                { "uniqueName": "/W/Cryophon", "name": "Cryophon",
+                  "productCategory": "CrewShipWeapons", "omegaAttenuation": 0.5 }
+            ]
+        });
+        let w = weapons_from_manifest(&value);
+        assert_eq!(w.len(), 2);
+        let braton = w.iter().find(|x| x.unique_name == "/W/Braton").unwrap();
+        assert_eq!(braton.weapon_type, "LongGuns");
+        assert_eq!(braton.omega_attenuation, 1.0);
+        assert!(w.iter().all(|x| x.unique_name != "/W/NoOmega"));
+    }
+
+    #[test]
+    fn extracts_riven_bases_for_known_class_templates_only() {
+        let value = serde_json::json!({
+            "ExportUpgrades": [
+                {
+                    "uniqueName": "/Lotus/Upgrades/Mods/Randomized/LotusRifleRandomModRare",
+                    "upgradeEntries": [
+                        { "tag": "WeaponCritChanceMod", "prefixTag": "crita", "suffixTag": "cron",
+                          "upgradeValues": [{ "value": 0.0167, "locTag": "|val|% Critical Chance" }] }
+                    ]
+                },
+                { "uniqueName": "/Lotus/Upgrades/Mods/Randomized/RawRifleRandomMod" }
+            ]
+        });
+        let bases = riven_bases_from_manifest(&value);
+        assert_eq!(bases.len(), 1);
+        assert_eq!(bases[0].riven_class, "rifle");
+        assert_eq!(bases[0].tag, "WeaponCritChanceMod");
+        assert!((bases[0].base_value - 0.0167).abs() < 1e-9);
     }
 }

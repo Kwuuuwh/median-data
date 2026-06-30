@@ -580,7 +580,7 @@ fn is_expected_unresolved(display_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{BuildConfig, Categories, Endpoints};
+    use crate::config::{BuildConfig, Categories, Endpoints, RivenAttributes};
     use crate::wfm_bridge::{WfmBridge, WfmEntry, WfmMember, WfmSet};
     use wf_fetch::{ItemDrop, PlaceKind, Refinement, RelicReward};
 
@@ -622,6 +622,7 @@ mod tests {
                 langs: vec!["en".into(), "ru".into()],
                 item_manifests: vec!["ExportWeapons".into()],
             },
+            riven_attributes: RivenAttributes { attributes: vec![] },
         }
     }
 

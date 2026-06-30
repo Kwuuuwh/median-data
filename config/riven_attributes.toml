@@ -1,0 +1,287 @@
+[[attribute]]
+tag = "ComboDurationMod"
+prefix_tag = "tempi"
+suffix_tag = "nem"
+unit = "flat"
+name_en = "Combo Duration"
+name_ru = "Длительность Комбо"
+
+[[attribute]]
+tag = "SlideAttackCritChanceMod"
+prefix_tag = "pleci"
+suffix_tag = "nent"
+unit = "percent"
+name_en = "Critical Chance for Slide Attack"
+name_ru = "Шанс Критического Урона при Атаках в Скольжении"
+
+[[attribute]]
+tag = "WeaponAmmoMaxMod"
+prefix_tag = "ampi"
+suffix_tag = "bin"
+unit = "percent"
+name_en = "Ammo Maximum"
+name_ru = "Максимум Патронов"
+
+[[attribute]]
+tag = "WeaponArmorPiercingDamageMod"
+prefix_tag = "insi"
+suffix_tag = "cak"
+unit = "percent"
+name_en = "Puncture"
+name_ru = "Пронзающий Урон"
+
+[[attribute]]
+tag = "WeaponClipMaxMod"
+prefix_tag = "arma"
+suffix_tag = "tin"
+unit = "percent"
+name_en = "Magazine Capacity"
+name_ru = "Вместимость Магазина"
+
+[[attribute]]
+tag = "WeaponCritChanceMod"
+prefix_tag = "crita"
+suffix_tag = "cron"
+unit = "percent"
+name_en = "Critical Chance"
+name_ru = "Шанс Критического Урона"
+
+[[attribute]]
+tag = "WeaponCritDamageMod"
+prefix_tag = "acri"
+suffix_tag = "tis"
+unit = "percent"
+name_en = "Critical Damage"
+name_ru = "Критический Урон"
+
+[[attribute]]
+tag = "WeaponDamageAmountMod"
+prefix_tag = "visi"
+suffix_tag = "ata"
+unit = "percent"
+name_en = "Damage"
+name_ru = "Урон"
+
+[[attribute]]
+tag = "WeaponElectricityDamageMod"
+prefix_tag = "vexi"
+suffix_tag = "tio"
+unit = "percent"
+name_en = "Electricity"
+name_ru = "Урон Электричеством"
+
+[[attribute]]
+tag = "WeaponFactionDamageCorpus"
+prefix_tag = "manti"
+suffix_tag = "tron"
+unit = "flat"
+name_en = "Damage to Corpus"
+name_ru = "Урон Корпусу"
+
+[[attribute]]
+tag = "WeaponFactionDamageGrineer"
+prefix_tag = "argi"
+suffix_tag = "con"
+unit = "flat"
+name_en = "Damage to Grineer"
+name_ru = "Урон Гринир"
+
+[[attribute]]
+tag = "WeaponFactionDamageInfested"
+prefix_tag = "pura"
+suffix_tag = "ada"
+unit = "flat"
+name_en = "Damage to Infested"
+name_ru = "Урон Заражённым"
+
+[[attribute]]
+tag = "WeaponFireDamageMod"
+prefix_tag = "igni"
+suffix_tag = "pha"
+unit = "percent"
+name_en = "Heat"
+name_ru = "Урон Огнем"
+
+[[attribute]]
+tag = "WeaponFireIterationsMod"
+prefix_tag = "sati"
+suffix_tag = "can"
+unit = "percent"
+name_en = "Multishot"
+name_ru = "Мультивыстрел"
+
+[[attribute]]
+tag = "WeaponFireRateMod"
+prefix_tag = "croni"
+suffix_tag = "dra"
+unit = "percent"
+name_en = "Fire Rate / Attack Speed"
+name_ru = "Скорострельность / Скорость Атаки"
+
+[[attribute]]
+tag = "WeaponFreezeDamageMod"
+prefix_tag = "geli"
+suffix_tag = "do"
+unit = "percent"
+name_en = "Cold"
+name_ru = "Урон Холодом"
+
+[[attribute]]
+tag = "WeaponImpactDamageMod"
+prefix_tag = "magna"
+suffix_tag = "ton"
+unit = "percent"
+name_en = "Impact"
+name_ru = "Ударный Урон"
+
+[[attribute]]
+tag = "WeaponMeleeComboBonusOnHitMod"
+prefix_tag = "laci"
+suffix_tag = "nus"
+unit = "percent"
+name_en = "Additional Combo Count Chance"
+name_ru = "Шанс Получить Дополнительный Счетчик Комбо"
+
+[[attribute]]
+tag = "WeaponMeleeComboEfficiencyMod"
+prefix_tag = "forti"
+suffix_tag = "us"
+unit = "percent"
+name_en = "Heavy Attack Efficiency"
+name_ru = "Эффективность Тяжелой Атаки"
+
+[[attribute]]
+tag = "WeaponMeleeComboInitialBonusMod"
+prefix_tag = "para"
+suffix_tag = "um"
+unit = "flat"
+name_en = "Initial combo"
+name_ru = "Стартовый Счётчик Комбо"
+
+[[attribute]]
+tag = "WeaponMeleeComboPointsOnHitMod"
+prefix_tag = ""
+suffix_tag = ""
+unit = "percent"
+name_en = "Chance to Gain Combo Count"
+name_ru = "Шанс Увеличить Счетчик Комбо"
+
+[[attribute]]
+tag = "WeaponMeleeDamageMod"
+prefix_tag = "visi"
+suffix_tag = "ata"
+unit = "percent"
+name_en = "Damage"
+name_ru = "Урон"
+
+[[attribute]]
+tag = "WeaponMeleeFactionDamageCorpus"
+prefix_tag = "manti"
+suffix_tag = "tron"
+unit = "flat"
+name_en = "Damage to Corpus"
+name_ru = "Урон Корпусу"
+
+[[attribute]]
+tag = "WeaponMeleeFactionDamageGrineer"
+prefix_tag = "argi"
+suffix_tag = "con"
+unit = "flat"
+name_en = "Damage to Grineer"
+name_ru = "Урон Гринир"
+
+[[attribute]]
+tag = "WeaponMeleeFactionDamageInfested"
+prefix_tag = "pura"
+suffix_tag = "ada"
+unit = "flat"
+name_en = "Damage to Infested"
+name_ru = "Урон Заражённым"
+
+[[attribute]]
+tag = "WeaponMeleeFinisherDamageMod"
+prefix_tag = "exi"
+suffix_tag = "cta"
+unit = "percent"
+name_en = "Finisher Damage"
+name_ru = "Урон при Добивании"
+
+[[attribute]]
+tag = "WeaponMeleeRangeIncMod"
+prefix_tag = "locti"
+suffix_tag = "tor"
+unit = "flat"
+name_en = "Range"
+name_ru = "Дальность Поражения"
+
+[[attribute]]
+tag = "WeaponProcTimeMod"
+prefix_tag = "deci"
+suffix_tag = "des"
+unit = "percent"
+name_en = "Status Duration"
+name_ru = "Длительность Статуса"
+
+[[attribute]]
+tag = "WeaponProjectileSpeedMod"
+prefix_tag = "conci"
+suffix_tag = "nak"
+unit = "percent"
+name_en = "Projectile speed"
+name_ru = "Скорость Полёта Снаряда"
+
+[[attribute]]
+tag = "WeaponPunctureDepthMod"
+prefix_tag = "lexi"
+suffix_tag = "nok"
+unit = "flat"
+name_en = "Punch Through"
+name_ru = "Пронзание Навылет"
+
+[[attribute]]
+tag = "WeaponRecoilReductionMod"
+prefix_tag = "zeti"
+suffix_tag = "mag"
+unit = "percent"
+name_en = "Weapon Recoil"
+name_ru = "Отдача"
+
+[[attribute]]
+tag = "WeaponReloadSpeedMod"
+prefix_tag = "feva"
+suffix_tag = "tak"
+unit = "percent"
+name_en = "Reload Speed"
+name_ru = "Скорость Перезарядки"
+
+[[attribute]]
+tag = "WeaponSlashDamageMod"
+prefix_tag = "sci"
+suffix_tag = "sus"
+unit = "percent"
+name_en = "Slash"
+name_ru = "Разрезающий Урон"
+
+[[attribute]]
+tag = "WeaponStunChanceMod"
+prefix_tag = "hexa"
+suffix_tag = "dex"
+unit = "percent"
+name_en = "Status Chance"
+name_ru = "Шанс Статуса"
+
+[[attribute]]
+tag = "WeaponToxinDamageMod"
+prefix_tag = "toxi"
+suffix_tag = "tox"
+unit = "percent"
+name_en = "Toxin"
+name_ru = "Урон Токсином"
+
+[[attribute]]
+tag = "WeaponZoomFovMod"
+prefix_tag = "hera"
+suffix_tag = "lis"
+unit = "percent"
+name_en = "Zoom"
+name_ru = "Приближение"
