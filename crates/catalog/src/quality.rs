@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Row counts for each catalog table.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(default)]
 pub struct TableCounts {
     pub items: u64,
     pub item_names: u64,
